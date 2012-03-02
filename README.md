@@ -1,7 +1,7 @@
 # this is the README for android-audiotest
 
 This project demonstrates streaming audio IO on android with OpenSL ES, by plugging the mono input 
-from the audio device into a stereo output.
+from the audio device into its stereo output.
 
 Build Instructions
 

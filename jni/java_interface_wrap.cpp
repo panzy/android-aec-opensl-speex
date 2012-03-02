@@ -211,10 +211,7 @@ static void SWIGUNUSED SWIG_JavaThrowException(JNIEnv *jenv, SWIG_JavaExceptionC
 #define SWIG_contract_assert(nullreturn, expr, msg) if (!(expr)) {SWIG_JavaThrowException(jenv, SWIG_JavaIllegalArgumentException, msg); return nullreturn; } else
 
 
-    #include <SLES/OpenSLES.h>
-    #include <SLES/OpenSLES_Android.h>
-    #include "opensl_io.h"
-    #include "opensl_example.h"
+#include "opensl_example.h"
 
 
 #ifdef __cplusplus
