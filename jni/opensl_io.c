@@ -217,10 +217,14 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
     SLDataSource audioSrc = {&loc_dev, NULL};
 
     // configure audio sink
+    int speakers;
+    if(channels > 1) 
+      speakers = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
+    else speakers = SL_SPEAKER_FRONT_CENTER;
     SLDataLocator_AndroidSimpleBufferQueue loc_bq = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
     SLDataFormat_PCM format_pcm = {SL_DATAFORMAT_PCM, channels, sr,
 				   SL_PCMSAMPLEFORMAT_FIXED_16, SL_PCMSAMPLEFORMAT_FIXED_16,
-				   SL_SPEAKER_FRONT_CENTER, SL_BYTEORDER_LITTLEENDIAN};
+				   speakers, SL_BYTEORDER_LITTLEENDIAN};
     SLDataSink audioSnk = {&loc_bq, &format_pcm};
 
     // create audio recorder
