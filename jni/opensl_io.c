@@ -92,6 +92,9 @@ static SLresult openSLPlayOpen(OPENSL_STREAM *p)
     case 44100:
       sr = SL_SAMPLINGRATE_44_1;
       break;
+    case 48000:
+      sr = SL_SAMPLINGRATE_48;
+      break;
     case 64000:
       sr = SL_SAMPLINGRATE_64;
       break;
@@ -194,6 +197,9 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
       break;
     case 44100:
       sr = SL_SAMPLINGRATE_44_1;
+      break;
+    case 48000:
+      sr = SL_SAMPLINGRATE_48;
       break;
     case 64000:
       sr = SL_SAMPLINGRATE_64;

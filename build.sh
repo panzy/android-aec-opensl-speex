@@ -1,6 +1,6 @@
 #!/bin/sh
 
-export ANDROID_NDK_ROOT=$HOME/work/android-ndk-r7
+export ANDROID_NDK_ROOT=$HOME/src/android-ndk-r8b
 
 rm -rf src/opensl_example
 mkdir -p src/opensl_example
