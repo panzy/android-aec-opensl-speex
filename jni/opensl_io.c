@@ -448,7 +448,7 @@ void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 // puts a buffer of size samples to the device
 int android_AudioOut(OPENSL_STREAM *p, float *buffer,int size){
 
-  short *outBuffer, *inBuffer;
+  short *outBuffer;
   int i, bufsamps = p->outBufSamples, index = p->currentOutputIndex;
   if(p == NULL  || bufsamps ==  0)  return 0;
   outBuffer = p->outputBuffer[p->currentOutputBuffer];
