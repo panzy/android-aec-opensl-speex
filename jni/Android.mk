@@ -9,7 +9,7 @@ LOCAL_CPPFLAGS :=$(LOCAL_CFLAGS)
 ###
 
 LOCAL_SRC_FILES := opensl_example.c \
-opensl_io2.c \
+opensl_io3.c \
 java_interface_wrap.cpp 
 
 LOCAL_LDLIBS := -llog -lOpenSLES
