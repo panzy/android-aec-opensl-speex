@@ -29,13 +29,24 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.audiotest;
 
+import android.util.Log;
 import opensl_example.opensl_example;
 import android.app.Activity;
 import android.os.Bundle;
 
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
 public class AudiotestActivity extends Activity {
+    private static final String TAG = "audiotest";
     /** Called when the activity is first created. */
 	Thread thread;
+    Thread thread2;
+    Thread thread3;
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -46,19 +57,76 @@ public class AudiotestActivity extends Activity {
 				opensl_example.start_process();
 			}
 		};
-		thread.start();   
+		thread.start();
+
+        thread3 = new Thread() {
+            public void run() {
+                try {
+                    Thread.sleep(200);
+
+                    short[] buf = new short[80];
+                    byte[] bytes = new byte[160];
+                    FileOutputStream fos = new FileOutputStream("/mnt/sdcard/tmp/out.dat");
+                    while(thread != null) {
+                        int n = opensl_example.pull(buf);
+                        if (n > 0) {
+                            ByteBuffer.wrap(bytes)
+                                    .order(ByteOrder.LITTLE_ENDIAN)
+                                    .asShortBuffer().put(buf);
+                            fos.write(bytes);
+                        }
+                    }
+                    fos.close();
+                } catch (InterruptedException e) {
+                } catch (FileNotFoundException e) {
+                } catch (IOException e) {
+                }
+            }
+        };
+        thread3.start();
+
+        thread2 = new Thread() {
+            public void run() {
+                try {
+                    Thread.sleep(200);
+                    FileInputStream fis = new FileInputStream("/mnt/sdcard/tmp/speaker.dat");
+                    short[] buf = new short[80];
+                    byte[] bytes = new byte[160];
+                    if (fis != null) {
+                        while (thread != null && fis.read(bytes) > 0) {
+                            ByteBuffer.wrap(bytes)
+                                    .order(ByteOrder.LITTLE_ENDIAN)
+                                    .asShortBuffer().get(buf);
+
+                            sleep(10);
+                            long t = System.currentTimeMillis();
+                            opensl_example.push(buf);
+                            long t2 = System.currentTimeMillis();
+                            Log.d(TAG, "push at " + (t2 - t));
+                        }
+                    }
+                    fis.close();
+                } catch (FileNotFoundException e) {
+                } catch (IOException e) {
+                } catch (InterruptedException e) {
+                }
+            }
+        };
+        thread2.start();
     }
     public void onDestroy(){
     	
     	super.onDestroy();
     	opensl_example.stop_process();
     	try {
+            thread2.interrupt();
+            thread3.interrupt();
 			thread.join();
 		} catch (InterruptedException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
     	thread = null;
-    	
+        thread2 = null;
     }
 }

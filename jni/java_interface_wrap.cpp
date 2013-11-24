@@ -232,6 +232,38 @@ SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_stop_1process(JN
 }
 
 
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_push(JNIEnv *jenv, jclass jcls, jshortArray jarg2) {
+  JNIEnv *arg1 = (JNIEnv *) 0 ;
+  jshortArray arg2 ;
+  
+  (void)jenv;
+  (void)jcls;
+  
+  arg1 = jenv;
+  
+  arg2 = jarg2; 
+  push(arg1,arg2);
+}
+
+
+SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_pull(JNIEnv *jenv, jclass jcls, jshortArray jarg2) {
+  jint jresult = 0 ;
+  JNIEnv *arg1 = (JNIEnv *) 0 ;
+  jshortArray arg2 ;
+  int result;
+  
+  (void)jenv;
+  (void)jcls;
+  
+  arg1 = jenv;
+  
+  arg2 = jarg2; 
+  result = (int)pull(arg1,arg2);
+  jresult = (jint)result; 
+  return jresult;
+}
+
+
 #ifdef __cplusplus
 }
 #endif

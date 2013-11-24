@@ -416,7 +416,7 @@ void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 }
  
 // gets a buffer of size samples from the device
-int android_AudioIn(OPENSL_STREAM *p,float *buffer,int size){
+int android_AudioIn(OPENSL_STREAM *p,short *buffer,int size){
   short *inBuffer;
   int i, bufsamps = p->inBufSamples, index = p->currentInputIndex;
   if(p == NULL || bufsamps ==  0) return 0;
@@ -431,7 +431,7 @@ int android_AudioIn(OPENSL_STREAM *p,float *buffer,int size){
       index = 0;
       inBuffer = p->inputBuffer[p->currentInputBuffer];
     }
-    buffer[i] = (float) inBuffer[index++]*CONVMYFLT;
+    buffer[i] = inBuffer[index++];
   }
   p->currentInputIndex = index;
   if(p->outchannels == 0) p->time += (double) size/(p->sr*p->inchannels);
@@ -446,7 +446,7 @@ void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 }
 
 // puts a buffer of size samples to the device
-int android_AudioOut(OPENSL_STREAM *p, float *buffer,int size){
+int android_AudioOut(OPENSL_STREAM *p, short *buffer,int size){
 
   short *outBuffer;
   int i, bufsamps = p->outBufSamples, index = p->currentOutputIndex;
@@ -454,7 +454,7 @@ int android_AudioOut(OPENSL_STREAM *p, float *buffer,int size){
   outBuffer = p->outputBuffer[p->currentOutputBuffer];
 
   for(i=0; i < size; i++){
-    outBuffer[index++] = (short) (buffer[i]*CONV16BIT);
+    outBuffer[index++] = buffer[i];
     if (index >= p->outBufSamples) {
       waitThreadLock(p->outlock);
       (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue, 
@@ -525,5 +525,75 @@ void destroyThreadLock(void *lock)
   notifyThreadLock(p);
   pthread_cond_destroy(&(p->c));
   pthread_mutex_destroy(&(p->m));
+  free(p);
+}
+
+circular_buffer* create_circular_buffer(int count){
+  circular_buffer *p;
+  if ((p = calloc(1, sizeof(circular_buffer))) == NULL) {
+    return NULL;
+  }
+  p->size = count;
+  p->wp = p->rp = 0;
+   
+  if ((p->buffer = calloc(count, sizeof(short))) == NULL) {
+    free (p);
+    return NULL;
+  }
+  return p;
+}
+
+int checkspace_circular_buffer(circular_buffer *p, int writeCheck){
+  int wp = p->wp, rp = p->rp, size = p->size;
+  if(writeCheck){
+    if (wp > rp) return rp - wp + size - 1;
+    else if (wp < rp) return rp - wp - 1;
+    else return size - 1;
+  }
+  else {
+    if (wp > rp) return wp - rp;
+    else if (wp < rp) return wp - rp + size;
+    else return 0;
+  }	
+}
+
+// return: 0 or count.
+int read_circular_buffer(circular_buffer *p, short *out, int count){
+  int remaining;
+  int size = p->size;
+  int i=0, rp = p->rp;
+  short *buffer = p->buffer;
+  if ((remaining = checkspace_circular_buffer(p, 0)) < count) {
+    return 0;
+  }
+  for(i=0; i < count; i++){
+    out[i] = buffer[rp++];
+    if(rp == size) rp = 0;
+  }
+  p->rp = rp;
+  return count;
+}
+
+int write_circular_buffer(circular_buffer *p, const short *in, int count){
+  int remaining;
+  int countwrite, size = p->size;
+  int i=0, wp = p->wp;
+  short *buffer = p->buffer;
+  if ((remaining = checkspace_circular_buffer(p, 1)) == 0) {
+    return 0;
+  }
+  countwrite = count > remaining ? remaining : count;
+  for(i=0; i < countwrite; i++){
+    buffer[wp++] = in[i];
+    if(wp == size) wp = 0;
+  }
+  p->wp = wp;
+  return countwrite;
+}
+
+void
+free_circular_buffer (circular_buffer *p){
+  if(p == NULL) return;
+  free(p->buffer);
   free(p);
 }

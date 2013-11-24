@@ -27,31 +27,70 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#include <jni.h>
 #include <android/log.h>
 #include "opensl_io.h"
+#include "opensl_io3.h"
 
-#define BUFFERFRAMES 1024
-#define VECSAMPS_MONO 64
-#define VECSAMPS_STEREO 128
-#define SR 44100
+#define VECSAMPS_MONO 80 // frame size in samples
+#define BUFFERFRAMES (VECSAMPS_MONO * 20) // queue size in samples
+#define SR 8000 // sample rate
+#define PLAY_ON_MAIN_PROC 0 // playback on main thread or push thread?
 
 static int on;
+OPENSL_STREAM  *p = NULL;
+
+circular_buffer *playbuf = NULL;
+circular_buffer *recbuf = NULL;
+
 void start_process() {
-  OPENSL_STREAM  *p;
   int samps, i, j;
-  float  inbuffer[VECSAMPS_MONO], outbuffer[VECSAMPS_STEREO];
-  p = android_OpenAudioDevice(SR,1,2,BUFFERFRAMES);
+  short inbuffer[VECSAMPS_MONO];
+  short outbuffer[VECSAMPS_MONO];
+
+  playbuf = create_circular_buffer(BUFFERFRAMES);
+  recbuf = create_circular_buffer(BUFFERFRAMES);
+
+  p = android_OpenAudioDevice(SR,1,1,BUFFERFRAMES);
   if(p == NULL) return; 
+
   on = 1;
   while(on) {
-   samps = android_AudioIn(p,inbuffer,VECSAMPS_MONO);
-   for(i = 0, j=0; i < samps; i++, j+=2)
-     outbuffer[j] = outbuffer[j+1] = inbuffer[i];
-   android_AudioOut(p,outbuffer,samps*2); 
+    samps = android_AudioIn(p,inbuffer,VECSAMPS_MONO);
+
+    int n = read_circular_buffer(playbuf, outbuffer, VECSAMPS_MONO);
+    if (n == VECSAMPS_MONO) {
+#if PLAY_ON_MAIN_PROC
+      android_AudioOut(p,outbuffer,samps); 
+#endif
+    }
+
+    write_circular_buffer(recbuf, inbuffer, VECSAMPS_MONO);
   }  
+
   android_CloseAudioDevice(p);
+  free_circular_buffer(playbuf);
 }
 
 void stop_process(){
   on = 0;
+  //android_CloseAudioDevice(p);
+  //free_circular_buffer(playbuf);
+}
+
+int pull(JNIEnv *env, jshortArray buf) {
+  jshort *_buf = (*env)->GetShortArrayElements(env, buf, NULL);
+  int n = read_circular_buffer(recbuf, _buf, VECSAMPS_MONO);
+  (*env)->ReleaseShortArrayElements(env, buf, _buf, 0);
+  return n;
+}
+
+void push(JNIEnv *env, jshortArray farend) {
+  jshort *_farend = (*env)->GetShortArrayElements(env, farend, NULL);
+  jsize samps = (*env)->GetArrayLength(env, farend);
+  write_circular_buffer(playbuf, _farend, samps);
+#if !PLAY_ON_MAIN_PROC
+  android_AudioOut(p,_farend,samps); 
+#endif
+  (*env)->ReleaseShortArrayElements(env, farend, _farend, 0);
 }

@@ -43,4 +43,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   }
 %}
 
+%typemap(in, numinputs=0) JNIEnv* %{
+    $1 = jenv;
+%}
+
 %include "opensl_example.h"
