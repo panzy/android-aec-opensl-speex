@@ -21,6 +21,7 @@ public class opensl_exampleJNI {
 
   public final static native void start_process();
   public final static native void stop_process();
-  public final static native void push(short[] jarg2);
+  public final static native int push(short[] jarg2);
   public final static native int pull(short[] jarg2);
+  public final static native double getTimestamp();
 }

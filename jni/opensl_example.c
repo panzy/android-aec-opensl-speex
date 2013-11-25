@@ -30,10 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <jni.h>
 #include <android/log.h>
 #include "opensl_io.h"
-#include "opensl_io3.h"
+#include "webrtc/modules/audio_processing/aecm/include/echo_control_mobile.h"
+#include "webrtc/modules/audio_processing/ns/ns_core.h"
+#include "webrtc/modules/audio_processing/ns/include/noise_suppression_x.h"
 
 #define VECSAMPS_MONO 80 // frame size in samples
-#define BUFFERFRAMES (VECSAMPS_MONO * 20) // queue size in samples
+#define BUFFERFRAMES (VECSAMPS_MONO * 50) // queue size in samples
 #define SR 8000 // sample rate
 #define PLAY_ON_MAIN_PROC 0 // playback on main thread or push thread?
 
@@ -43,13 +45,24 @@ OPENSL_STREAM  *p = NULL;
 circular_buffer *playbuf = NULL;
 circular_buffer *recbuf = NULL;
 
+void *aecm = NULL;
+NsxHandle *ns_inst;
+
 void start_process() {
   int samps, i, j;
   short inbuffer[VECSAMPS_MONO];
   short outbuffer[VECSAMPS_MONO];
+  short processedbuffer[VECSAMPS_MONO];
 
   playbuf = create_circular_buffer(BUFFERFRAMES);
   recbuf = create_circular_buffer(BUFFERFRAMES);
+
+  WebRtcNsx_Create(&ns_inst);
+  WebRtcNsx_Init(ns_inst, SR);
+  WebRtcNsx_set_policy(ns_inst, 2);
+
+  WebRtcAecm_Create(&aecm);
+  WebRtcAecm_Init(aecm, SR);
 
   p = android_OpenAudioDevice(SR,1,1,BUFFERFRAMES);
   if(p == NULL) return; 
@@ -63,19 +76,28 @@ void start_process() {
 #if PLAY_ON_MAIN_PROC
       android_AudioOut(p,outbuffer,samps); 
 #endif
-    }
+      //write_circular_buffer(recbuf, inbuffer, VECSAMPS_MONO);
+      
+      WebRtcNsx_Process(ns_inst, inbuffer, NULL, processedbuffer, NULL);
 
-    write_circular_buffer(recbuf, inbuffer, VECSAMPS_MONO);
+      //WebRtcAecm_BufferFarend(aecm, outbuffer, VECSAMPS_MONO);
+      //WebRtcAecm_Process(
+      //    aecm, inbuffer, NULL, processedbuffer, VECSAMPS_MONO, 500);
+      
+      write_circular_buffer(recbuf, processedbuffer, VECSAMPS_MONO);
+    } else {
+      write_circular_buffer(recbuf, inbuffer, VECSAMPS_MONO);
+    }
   }  
 
   android_CloseAudioDevice(p);
   free_circular_buffer(playbuf);
+  WebRtcAecm_Free(aecm);
+  WebRtcNsx_Free(ns_inst);
 }
 
 void stop_process(){
   on = 0;
-  //android_CloseAudioDevice(p);
-  //free_circular_buffer(playbuf);
 }
 
 int pull(JNIEnv *env, jshortArray buf) {
@@ -85,12 +107,20 @@ int pull(JNIEnv *env, jshortArray buf) {
   return n;
 }
 
-void push(JNIEnv *env, jshortArray farend) {
+int push(JNIEnv *env, jshortArray farend) {
   jshort *_farend = (*env)->GetShortArrayElements(env, farend, NULL);
   jsize samps = (*env)->GetArrayLength(env, farend);
-  write_circular_buffer(playbuf, _farend, samps);
+  int rtn = samps;
+  if (write_circular_buffer(playbuf, _farend, samps) != samps)
+    rtn = 0;
 #if !PLAY_ON_MAIN_PROC
-  android_AudioOut(p,_farend,samps); 
+  if (android_AudioOut(p,_farend,samps) != samps)
+    rtn = 0; 
 #endif
   (*env)->ReleaseShortArrayElements(env, farend, _farend, 0);
+  return rtn;
+}
+
+double getTimestamp() {
+  return android_GetTimestamp(p);
 }

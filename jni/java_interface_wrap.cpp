@@ -232,9 +232,11 @@ SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_stop_1process(JN
 }
 
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_push(JNIEnv *jenv, jclass jcls, jshortArray jarg2) {
+SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_push(JNIEnv *jenv, jclass jcls, jshortArray jarg2) {
+  jint jresult = 0 ;
   JNIEnv *arg1 = (JNIEnv *) 0 ;
   jshortArray arg2 ;
+  int result;
   
   (void)jenv;
   (void)jcls;
@@ -242,7 +244,9 @@ SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_push(JNIEnv *jen
   arg1 = jenv;
   
   arg2 = jarg2; 
-  push(arg1,arg2);
+  result = (int)push(arg1,arg2);
+  jresult = (jint)result; 
+  return jresult;
 }
 
 
@@ -260,6 +264,18 @@ SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_pull(JNIEnv *jen
   arg2 = jarg2; 
   result = (int)pull(arg1,arg2);
   jresult = (jint)result; 
+  return jresult;
+}
+
+
+SWIGEXPORT jdouble JNICALL Java_opensl_1example_opensl_1exampleJNI_getTimestamp(JNIEnv *jenv, jclass jcls) {
+  jdouble jresult = 0 ;
+  double result;
+  
+  (void)jenv;
+  (void)jcls;
+  result = (double)getTimestamp();
+  jresult = (jdouble)result; 
   return jresult;
 }
 

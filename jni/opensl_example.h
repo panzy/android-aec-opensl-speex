@@ -33,10 +33,12 @@ extern "C" {
   void start_process();
   void stop_process();
   /* Enqueue audio frame to play. 
-   * Will block if the queue is full. */
-  void push(JNIEnv *env, jshortArray buf);
+   * Will block if the queue is full.
+   * return: 0 or buf.len */
+  int push(JNIEnv *env, jshortArray buf);
   /* return: 0 or buf.len */
   int pull(JNIEnv *env, jshortArray buf);
+  double getTimestamp();
 #ifdef __cplusplus
 };
 #endif

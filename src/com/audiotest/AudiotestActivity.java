@@ -43,6 +43,10 @@ import java.nio.ByteOrder;
 
 public class AudiotestActivity extends Activity {
     private static final String TAG = "audiotest";
+    private static final int SR = 8000; // sample rate
+    private static final int FRAME_SAMPS = 80; // 80 samples per frame
+    private static final int FRAME_MS = 10; // 10ms
+
     /** Called when the activity is first created. */
 	Thread thread;
     Thread thread2;
@@ -62,10 +66,10 @@ public class AudiotestActivity extends Activity {
         thread3 = new Thread() {
             public void run() {
                 try {
-                    Thread.sleep(200);
+                    Thread.sleep(500);
 
-                    short[] buf = new short[80];
-                    byte[] bytes = new byte[160];
+                    short[] buf = new short[FRAME_SAMPS];
+                    byte[] bytes = new byte[FRAME_SAMPS * 2];
                     FileOutputStream fos = new FileOutputStream("/mnt/sdcard/tmp/out.dat");
                     while(thread != null) {
                         int n = opensl_example.pull(buf);
@@ -88,24 +92,27 @@ public class AudiotestActivity extends Activity {
         thread2 = new Thread() {
             public void run() {
                 try {
-                    Thread.sleep(200);
+                    Thread.sleep(500);
                     FileInputStream fis = new FileInputStream("/mnt/sdcard/tmp/speaker.dat");
-                    short[] buf = new short[80];
-                    byte[] bytes = new byte[160];
+                    short[] buf = new short[FRAME_SAMPS];
+                    byte[] bytes = new byte[FRAME_SAMPS * 2];
                     if (fis != null) {
+                        long t = System.currentTimeMillis();
                         while (thread != null && fis.read(bytes) > 0) {
                             ByteBuffer.wrap(bytes)
                                     .order(ByteOrder.LITTLE_ENDIAN)
                                     .asShortBuffer().get(buf);
 
-                            sleep(10);
-                            long t = System.currentTimeMillis();
-                            opensl_example.push(buf);
+                            sleep(FRAME_MS);
+                            if (opensl_example.push(buf) != FRAME_SAMPS)
+                                Log.d(TAG, "push failed");
                             long t2 = System.currentTimeMillis();
-                            Log.d(TAG, "push at " + (t2 - t));
+                            Log.d(TAG, "push elapse " + (t2 - t));
+                            t = t2;
                         }
                     }
                     fis.close();
+                    Log.d(TAG, "audio timestamp " + opensl_example.getTimestamp());
                 } catch (FileNotFoundException e) {
                 } catch (IOException e) {
                 } catch (InterruptedException e) {

@@ -17,12 +17,16 @@ public class opensl_example {
     opensl_exampleJNI.stop_process();
   }
 
-  public static void push(short[] buf) {
-    opensl_exampleJNI.push(buf);
+  public static int push(short[] buf) {
+    return opensl_exampleJNI.push(buf);
   }
 
   public static int pull(short[] buf) {
     return opensl_exampleJNI.pull(buf);
+  }
+
+  public static double getTimestamp() {
+    return opensl_exampleJNI.getTimestamp();
   }
 
 }
