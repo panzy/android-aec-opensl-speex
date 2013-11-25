@@ -50,9 +50,10 @@ NsxHandle *ns_inst;
 
 void start_process() {
   int samps, i, j;
-  short inbuffer[VECSAMPS_MONO];
-  short outbuffer[VECSAMPS_MONO];
+  short inbuffer[VECSAMPS_MONO]; // record
+  short outbuffer[VECSAMPS_MONO]; // playback
   short processedbuffer[VECSAMPS_MONO];
+  short processedbuffer2[VECSAMPS_MONO];
 
   playbuf = create_circular_buffer(BUFFERFRAMES);
   recbuf = create_circular_buffer(BUFFERFRAMES);
@@ -80,11 +81,11 @@ void start_process() {
       
       WebRtcNsx_Process(ns_inst, inbuffer, NULL, processedbuffer, NULL);
 
-      //WebRtcAecm_BufferFarend(aecm, outbuffer, VECSAMPS_MONO);
-      //WebRtcAecm_Process(
-      //    aecm, inbuffer, NULL, processedbuffer, VECSAMPS_MONO, 500);
+      WebRtcAecm_BufferFarend(aecm, outbuffer, VECSAMPS_MONO);
+      WebRtcAecm_Process(
+          aecm, inbuffer, processedbuffer, processedbuffer2, VECSAMPS_MONO, 500);
       
-      write_circular_buffer(recbuf, processedbuffer, VECSAMPS_MONO);
+      write_circular_buffer(recbuf, processedbuffer2, VECSAMPS_MONO);
     } else {
       write_circular_buffer(recbuf, inbuffer, VECSAMPS_MONO);
     }
