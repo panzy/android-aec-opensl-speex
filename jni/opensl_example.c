@@ -35,7 +35,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "webrtc/modules/audio_processing/ns/include/noise_suppression_x.h"
 
 #define VECSAMPS_MONO 80 // frame size in samples
-#define BUFFERFRAMES (VECSAMPS_MONO * 50) // queue size in samples
+#define BUFFERFRAMES (VECSAMPS_MONO * 20) // queue size in samples
 #define SR 8000 // sample rate
 #define PLAY_ON_MAIN_PROC 0 // playback on main thread or push thread?
 

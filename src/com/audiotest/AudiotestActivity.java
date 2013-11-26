@@ -98,21 +98,23 @@ public class AudiotestActivity extends Activity {
                     byte[] bytes = new byte[FRAME_SAMPS * 2];
                     if (fis != null) {
                         long t = System.currentTimeMillis();
+                        long t0 = t;
                         while (thread != null && fis.read(bytes) > 0) {
                             ByteBuffer.wrap(bytes)
                                     .order(ByteOrder.LITTLE_ENDIAN)
                                     .asShortBuffer().get(buf);
 
-                            sleep(FRAME_MS);
+                            // push() will block if internal queue is full
                             if (opensl_example.push(buf) != FRAME_SAMPS)
                                 Log.d(TAG, "push failed");
                             long t2 = System.currentTimeMillis();
                             Log.d(TAG, "push elapse " + (t2 - t));
                             t = t2;
                         }
+                        Log.d(TAG, "audio timestamp by opensl " + opensl_example.getTimestamp());
+                        Log.d(TAG, "audio timestamp by java " + (System.currentTimeMillis() - t0));
                     }
                     fis.close();
-                    Log.d(TAG, "audio timestamp " + opensl_example.getTimestamp());
                 } catch (FileNotFoundException e) {
                 } catch (IOException e) {
                 } catch (InterruptedException e) {
