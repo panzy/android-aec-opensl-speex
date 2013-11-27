@@ -27,18 +27,13 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-  void start_process();
-  void stop_process();
-  /* Enqueue audio frame to play. 
-   * Will block if the queue is full.
-   * return: 0 or buf.len */
-  int push(JNIEnv *env, jshortArray buf);
-  /* return: 0 or buf.len */
-  int pull(JNIEnv *env, jshortArray buf);
-  double getTimestamp();
-#ifdef __cplusplus
-};
-#endif
+void init();
+void run();
+void close();
+/* Enqueue audio frame to play. 
+ * Will block if the queue is full.
+ * return: 0 or buf.len */
+int push(JNIEnv *env, jshortArray buf);
+/* return: 0 or buf.len */
+int pull(JNIEnv *env, jshortArray buf);
+double getTimestamp();

@@ -332,7 +332,7 @@ OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels, 
     }
   }
 
-  p->currentInputIndex = 0;
+  p->currentOutputIndex = 0;
   p->currentOutputBuffer  = 0;
   p->currentInputIndex = p->inBufSamples;
   p->currentInputBuffer = 0; 

@@ -218,17 +218,24 @@ static void SWIGUNUSED SWIG_JavaThrowException(JNIEnv *jenv, SWIG_JavaExceptionC
 extern "C" {
 #endif
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_start_1process(JNIEnv *jenv, jclass jcls) {
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_init(JNIEnv *jenv, jclass jcls) {
   (void)jenv;
   (void)jcls;
-  start_process();
+  init();
 }
 
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_stop_1process(JNIEnv *jenv, jclass jcls) {
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_run(JNIEnv *jenv, jclass jcls) {
   (void)jenv;
   (void)jcls;
-  stop_process();
+  run();
+}
+
+
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_close(JNIEnv *jenv, jclass jcls) {
+  (void)jenv;
+  (void)jcls;
+  close();
 }
 
 

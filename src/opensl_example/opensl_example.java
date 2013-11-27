@@ -9,12 +9,16 @@
 package opensl_example;
 
 public class opensl_example {
-  public static void start_process() {
-    opensl_exampleJNI.start_process();
+  public static void init() {
+    opensl_exampleJNI.init();
   }
 
-  public static void stop_process() {
-    opensl_exampleJNI.stop_process();
+  public static void run() {
+    opensl_exampleJNI.run();
+  }
+
+  public static void close() {
+    opensl_exampleJNI.close();
   }
 
   public static int push(short[] buf) {

@@ -42,7 +42,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 public class AudiotestActivity extends Activity {
-    private static final String TAG = "audiotest";
+    private static final String TAG = "java";
     private static final int SR = 8000; // sample rate
     private static final int FRAME_SAMPS = 80; // 80 samples per frame
     private static final int FRAME_MS = 10; // 10ms
@@ -55,44 +55,17 @@ public class AudiotestActivity extends Activity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
+
         thread = new Thread() {
-			public void run() {
-				setPriority(Thread.MAX_PRIORITY);
-				opensl_example.start_process();
-			}
-		};
-		thread.start();
-
-        thread3 = new Thread() {
             public void run() {
-                try {
-                    Thread.sleep(500);
-
-                    short[] buf = new short[FRAME_SAMPS];
-                    byte[] bytes = new byte[FRAME_SAMPS * 2];
-                    FileOutputStream fos = new FileOutputStream("/mnt/sdcard/tmp/out.dat");
-                    while(thread != null) {
-                        int n = opensl_example.pull(buf);
-                        if (n > 0) {
-                            ByteBuffer.wrap(bytes)
-                                    .order(ByteOrder.LITTLE_ENDIAN)
-                                    .asShortBuffer().put(buf);
-                            fos.write(bytes);
-                        }
-                    }
-                    fos.close();
-                } catch (InterruptedException e) {
-                } catch (FileNotFoundException e) {
-                } catch (IOException e) {
-                }
+                setPriority(Thread.MAX_PRIORITY);
+                opensl_example.run();
             }
         };
-        thread3.start();
 
         thread2 = new Thread() {
             public void run() {
                 try {
-                    Thread.sleep(500);
                     FileInputStream fis = new FileInputStream("/mnt/sdcard/tmp/speaker.dat");
                     short[] buf = new short[FRAME_SAMPS];
                     byte[] bytes = new byte[FRAME_SAMPS * 2];
@@ -117,16 +90,44 @@ public class AudiotestActivity extends Activity {
                     fis.close();
                 } catch (FileNotFoundException e) {
                 } catch (IOException e) {
+                }
+            }
+        };
+
+        thread3 = new Thread() {
+            public void run() {
+                try {
+                    short[] buf = new short[FRAME_SAMPS];
+                    byte[] bytes = new byte[FRAME_SAMPS * 2];
+                    FileOutputStream fos = new FileOutputStream("/mnt/sdcard/tmp/out.dat");
+                    while(thread != null) {
+                        int n = opensl_example.pull(buf);
+                        if (n > 0) {
+                            ByteBuffer.wrap(bytes)
+                                    .order(ByteOrder.LITTLE_ENDIAN)
+                                    .asShortBuffer().put(buf);
+                            fos.write(bytes);
+                        } else {
+                        }
+                        sleep(FRAME_MS);
+                    }
+                    fos.close();
+                } catch (FileNotFoundException e) {
+                } catch (IOException e) {
                 } catch (InterruptedException e) {
                 }
             }
         };
+
+        opensl_example.init();
+		thread.start();
         thread2.start();
+        //thread3.start();
     }
     public void onDestroy(){
     	
     	super.onDestroy();
-    	opensl_example.stop_process();
+    	opensl_example.close();
     	try {
             thread2.interrupt();
             thread3.interrupt();

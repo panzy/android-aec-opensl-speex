@@ -12,6 +12,7 @@ public class opensl_exampleJNI {
 
   static {
     try {
+        java.lang.System.loadLibrary("webrtc_audio_preprocessing");
         java.lang.System.loadLibrary("opensl_example");
     } catch (UnsatisfiedLinkError e) {
         java.lang.System.err.println("native code library failed to load.\n" + e);
@@ -19,8 +20,9 @@ public class opensl_exampleJNI {
     }
   }
 
-  public final static native void start_process();
-  public final static native void stop_process();
+  public final static native void init();
+  public final static native void run();
+  public final static native void close();
   public final static native int push(short[] jarg2);
   public final static native int pull(short[] jarg2);
   public final static native double getTimestamp();

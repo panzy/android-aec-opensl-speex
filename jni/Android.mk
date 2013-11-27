@@ -16,8 +16,8 @@ LOCAL_CFLAGS := -O3
 LOCAL_CPPFLAGS :=$(LOCAL_CFLAGS)
 ###
 
-LOCAL_SRC_FILES := opensl_example.c \
-opensl_io.c \
+LOCAL_SRC_FILES := opensl_example.cpp  \
+opensl_io.c\
 java_interface_wrap.cpp 
 
 LOCAL_SHARED_LIBRARIES := libwebrtc_audio_preprocessing
