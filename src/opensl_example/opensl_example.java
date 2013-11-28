@@ -29,6 +29,18 @@ public class opensl_example {
     return opensl_exampleJNI.pull(buf);
   }
 
+  public static void speex_ec_open(int sampleRate, int bufsize, int totalSize) {
+    opensl_exampleJNI.speex_ec_open(sampleRate, bufsize, totalSize);
+  }
+
+  public static void speex_ec_process(SWIGTYPE_p_short input_frame, SWIGTYPE_p_short echo_frame, int len, SWIGTYPE_p_short output_frame) {
+    opensl_exampleJNI.speex_ec_process(SWIGTYPE_p_short.getCPtr(input_frame), SWIGTYPE_p_short.getCPtr(echo_frame), len, SWIGTYPE_p_short.getCPtr(output_frame));
+  }
+
+  public static void speex_ec_close() {
+    opensl_exampleJNI.speex_ec_close();
+  }
+
   public static double getTimestamp() {
     return opensl_exampleJNI.getTimestamp();
   }

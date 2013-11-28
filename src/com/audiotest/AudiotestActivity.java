@@ -29,6 +29,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.audiotest;
 
+import android.annotation.TargetApi;
+import android.content.Context;
+import android.content.pm.PackageManager;
+import android.media.AudioManager;
+import android.os.Build;
 import android.util.Log;
 import opensl_example.opensl_example;
 import android.app.Activity;
@@ -40,6 +45,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+
+import static android.os.Build.VERSION_CODES.*;
 
 public class AudiotestActivity extends Activity {
     private static final String TAG = "java";
@@ -123,7 +130,32 @@ public class AudiotestActivity extends Activity {
 		thread.start();
         thread2.start();
         //thread3.start();
+
+
+        checkAudioLowLatencyFeature();
+
+        querySampleRate();
     }
+
+    @TargetApi(JELLY_BEAN_MR1)
+    private void querySampleRate() {
+        if (Integer.valueOf(Build.VERSION.SDK) < 17)
+            return;
+        AudioManager am = (AudioManager) this.getSystemService(Context.AUDIO_SERVICE);
+        String fpb = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
+        String sr = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
+        Log.d(TAG, "AudioManager output frame per buf: " + fpb + ", sample rate: " + sr);
+    }
+
+    /**
+     * false on Moto Xoom
+     */
+    private void checkAudioLowLatencyFeature() {
+        PackageManager pm = this.getPackageManager();
+        boolean claimsFeature = pm.hasSystemFeature(PackageManager.FEATURE_AUDIO_LOW_LATENCY);
+        Log.d(TAG, "has feature audio low latency: " + claimsFeature);
+    }
+
     public void onDestroy(){
     	
     	super.onDestroy();

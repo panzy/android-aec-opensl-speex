@@ -275,6 +275,51 @@ SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_pull(JNIEnv *jen
 }
 
 
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_speex_1ec_1open(JNIEnv *jenv, jclass jcls, jint jarg2, jint jarg3, jint jarg4) {
+  JNIEnv *arg1 = (JNIEnv *) 0 ;
+  int arg2 ;
+  int arg3 ;
+  int arg4 ;
+  
+  (void)jenv;
+  (void)jcls;
+  
+  arg1 = jenv;
+  
+  arg2 = (int)jarg2; 
+  arg3 = (int)jarg3; 
+  arg4 = (int)jarg4; 
+  speex_ec_open(arg1,arg2,arg3,arg4);
+}
+
+
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_speex_1ec_1process(JNIEnv *jenv, jclass jcls, jlong jarg2, jlong jarg3, jint jarg4, jlong jarg5) {
+  JNIEnv *arg1 = (JNIEnv *) 0 ;
+  short *arg2 = (short *) 0 ;
+  short *arg3 = (short *) 0 ;
+  int arg4 ;
+  short *arg5 = (short *) 0 ;
+  
+  (void)jenv;
+  (void)jcls;
+  
+  arg1 = jenv;
+  
+  arg2 = *(short **)&jarg2; 
+  arg3 = *(short **)&jarg3; 
+  arg4 = (int)jarg4; 
+  arg5 = *(short **)&jarg5; 
+  speex_ec_process(arg1,arg2,arg3,arg4,arg5);
+}
+
+
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_speex_1ec_1close(JNIEnv *jenv, jclass jcls) {
+  (void)jenv;
+  (void)jcls;
+  speex_ec_close();
+}
+
+
 SWIGEXPORT jdouble JNICALL Java_opensl_1example_opensl_1exampleJNI_getTimestamp(JNIEnv *jenv, jclass jcls) {
   jdouble jresult = 0 ;
   double result;

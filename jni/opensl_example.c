@@ -38,9 +38,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "webrtc/modules/audio_processing/ns/ns_core.h"
 #include "webrtc/modules/audio_processing/ns/include/noise_suppression_x.h"
 
+#include "speex/speex_echo.h"
+#include "speex/speex_preprocess.h"
+
 #define VECSAMPS_MONO 80 // frame size in samples
 #define BUFFERFRAMES (VECSAMPS_MONO * 50) // queue size in samples
 #define SR 8000 // sample rate
+
+SpeexEchoState *st;
+SpeexPreprocessState *den;
 
 typedef long long int64;
 
@@ -176,3 +182,32 @@ double getTimestamp()
 {
   return android_GetTimestamp(p);
 }
+
+void speex_ec_open (JNIEnv *env, int sampleRate, int bufsize, int totalSize)
+{
+     //init
+     st = speex_echo_state_init(bufsize, totalSize);
+     den = speex_preprocess_state_init(bufsize, sampleRate);
+     speex_echo_ctl(st, SPEEX_ECHO_SET_SAMPLING_RATE, &sampleRate);
+     speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_ECHO_STATE, st);
+     int value = 1;
+     speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value);
+     speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value);
+     speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_DENOISE, &value);
+}
+
+void speex_ec_process (JNIEnv * env, short* input_frame, short* echo_frame, int len,
+    short* output_frame)
+{
+  //call echo cancellation
+  speex_echo_cancellation(st, input_frame, echo_frame, output_frame);
+  //preprocess output frame
+  //speex_preprocess_run(den, native_output_frame);
+}
+
+void speex_ec_close ()
+{
+  speex_echo_state_destroy(st);
+  speex_preprocess_state_destroy(den);
+}
+
