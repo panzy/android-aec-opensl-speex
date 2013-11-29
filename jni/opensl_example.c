@@ -116,8 +116,8 @@ void run()
 
   // delay between play and rec in samples
   int delay = (BUFFERFRAMES / FRAME_SAMPS) /* recorder buffer queue */
-    + 3 /* play latency */
-    + 10 /* extra play latency */
+    + 2 /* play latency */
+    //+ 10 /* extra play latency */
     ;
   i = 0;
   while(on) {
@@ -126,10 +126,10 @@ void run()
     // discard head frames
     if (i++ < delay) continue;
 
+    dump_audio(inbuffer, fd_mic);
     read_circular_buffer(playbuf, refbuf, FRAME_SAMPS);
     speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
     speex_preprocess_run(den, processedbuffer);
-    dump_audio(inbuffer, fd_mic);
     dump_audio(processedbuffer, fd_out);
   }  
 
@@ -184,8 +184,8 @@ void speex_ec_open (int sampleRate, int bufsize, int totalSize)
   speex_echo_ctl(st, SPEEX_ECHO_SET_SAMPLING_RATE, &sampleRate);
   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_ECHO_STATE, st);
   int value = 1;
-  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value);
-  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value);
+  //speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value);
+  //speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value);
   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_DENOISE, &value);
 }
 
