@@ -36,8 +36,4 @@ void close();
 int push(JNIEnv *env, jshortArray buf);
 /* return: 0 or buf.len */
 int pull(JNIEnv *env, jshortArray buf);
-void speex_ec_open (JNIEnv *env, int sampleRate, int bufsize, int totalSize);
-void speex_ec_process (JNIEnv * env, short* input_frame, short* echo_frame, int len,
-    short* output_frame);
-void speex_ec_close ();
 double getTimestamp();

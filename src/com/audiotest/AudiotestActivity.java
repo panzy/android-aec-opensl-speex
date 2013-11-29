@@ -51,8 +51,8 @@ import static android.os.Build.VERSION_CODES.*;
 public class AudiotestActivity extends Activity {
     private static final String TAG = "java";
     private static final int SR = 8000; // sample rate
-    private static final int FRAME_SAMPS = 80; // 80 samples per frame
-    private static final int FRAME_MS = 10; // 10ms
+    private static final int FRAME_SAMPS = 160; // samples per frame
+    private static final int FRAME_MS = 1000 * FRAME_SAMPS / SR; // ms
 
     /** Called when the activity is first created. */
 	Thread thread;

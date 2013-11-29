@@ -34,16 +34,23 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <queue>
 #include <stdio.h>
 #include "opensl_io.h"
-#include "webrtc/modules/audio_processing/aecm/include/echo_control_mobile.h"
-#include "webrtc/modules/audio_processing/ns/ns_core.h"
-#include "webrtc/modules/audio_processing/ns/include/noise_suppression_x.h"
 
 #include "speex/speex_echo.h"
 #include "speex/speex_preprocess.h"
 
-#define VECSAMPS_MONO 80 // frame size in samples
-#define BUFFERFRAMES (VECSAMPS_MONO * 50) // queue size in samples
+#include "opensl_example.h"
+
 #define SR 8000 // sample rate
+#define FRAME_SAMPS 160
+#define FRAME_MS (1000 * FRAME_SAMPS / SR)
+#define BUFFERFRAMES (FRAME_SAMPS * 50) // queue size in samples
+
+//--------------------------------------------------------------------------------
+
+void speex_ec_open (int sampleRate, int bufsize, int totalSize);
+void speex_ec_close ();
+
+//--------------------------------------------------------------------------------
 
 SpeexEchoState *st;
 SpeexPreprocessState *den;
@@ -54,9 +61,9 @@ static int on;
 OPENSL_STREAM  *p = NULL;
 
 circular_buffer *recbuf = NULL;
+circular_buffer *playbuf = NULL;
 
 void *aecm = NULL;
-NsxHandle *ns_inst;
 
 int64 t_start;
 std::queue<int64> t_render;
@@ -75,25 +82,24 @@ int64 timestamp(int64 base)
 
 void dump_audio(short *frame, FILE *fd)
 {
-  static float buf[VECSAMPS_MONO];
-  for (int i = 0; i < VECSAMPS_MONO; ++i) {
-    buf[i] = frame[i] / 32768.0;
-  }
-  fwrite(buf, VECSAMPS_MONO, 4, fd);
+  //static float buf[FRAME_SAMPS];
+  //for (int i = 0; i < FRAME_SAMPS; ++i) {
+  //  buf[i] = frame[i] / 32768.0;
+  //}
+  //fwrite(buf, FRAME_SAMPS, 4, fd);
+
+  fwrite(frame, FRAME_SAMPS, 2, fd);
 }
 
 void init()
 {
   recbuf = create_circular_buffer(BUFFERFRAMES);
+  playbuf = create_circular_buffer(BUFFERFRAMES * 3);
 
-  WebRtcNsx_Create(&ns_inst);
-  WebRtcNsx_Init(ns_inst, SR);
-  WebRtcNsx_set_policy(ns_inst, 2);
-
-  WebRtcAecm_Create(&aecm);
-  WebRtcAecm_Init(aecm, SR);
+  speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
 
   p = android_OpenAudioDevice(SR,1,1,BUFFERFRAMES);
+
   if(p == NULL) return; 
   fd_out = fopen("/mnt/sdcard/tmp/out.dat", "w+");
   fd_mic = fopen("/mnt/sdcard/tmp/mic.dat", "w+");
@@ -104,44 +110,30 @@ void init()
 void run() 
 {
   int samps, i, j;
-  short inbuffer[VECSAMPS_MONO]; // record
-  short processedbuffer[VECSAMPS_MONO];
-  short processedbuffer2[VECSAMPS_MONO];
+  short inbuffer[FRAME_SAMPS]; // record
+  short refbuf[FRAME_SAMPS];
+  short processedbuffer[FRAME_SAMPS];
 
+  // delay between play and rec in samples
+  int delay = (BUFFERFRAMES / FRAME_SAMPS) /* recorder buffer queue */
+    + 3 /* play latency */
+    + 10 /* extra play latency */
+    ;
+  i = 0;
   while(on) {
+    samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
 
-    samps = android_AudioIn(p,inbuffer,VECSAMPS_MONO);
-    int64 t_capture = timestamp(t_start) - (BUFFERFRAMES / VECSAMPS_MONO * 10);
+    // discard head frames
+    if (i++ < delay) continue;
 
-    WebRtcNsx_Process(ns_inst, inbuffer, NULL, processedbuffer, NULL);
-
-    if (!t_render.empty()) 
-    {
-      assert(!t_analyze.empty());
-      int64 t_process = timestamp(t_start);
-      int delay = (t_render.front() - t_analyze.front()) + (t_process - t_capture);
-      WebRtcAecm_Process(
-          aecm, inbuffer, processedbuffer, processedbuffer2, VECSAMPS_MONO, delay);
-      __android_log_print(ANDROID_LOG_DEBUG, "webrtc", "aecm process, delay=%d = (%lld - %lld) + (%lld - %lld)",
-          delay, t_render.front(), t_analyze.front(), t_process, t_capture);
-      //write_circular_buffer(recbuf, processedbuffer, VECSAMPS_MONO);
-      dump_audio(processedbuffer, fd_mic);
-      dump_audio(processedbuffer2, fd_out);
-      t_render.pop();
-      t_analyze.pop();
-    }
-    else
-    {
-      //__android_log_print(ANDROID_LOG_DEBUG, "webrtc", "aecm process skipped");
-      //write_circular_buffer(recbuf, processedbuffer, VECSAMPS_MONO);
-      dump_audio(processedbuffer, fd_mic);
-      dump_audio(processedbuffer, fd_out);
-    }
+    read_circular_buffer(playbuf, refbuf, FRAME_SAMPS);
+    speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
+    speex_preprocess_run(den, processedbuffer);
+    dump_audio(inbuffer, fd_mic);
+    dump_audio(processedbuffer, fd_out);
   }  
 
   android_CloseAudioDevice(p);
-  WebRtcAecm_Free(aecm);
-  WebRtcNsx_Free(ns_inst);
 }
 
 void close()
@@ -149,12 +141,13 @@ void close()
   on = 0;
   fclose(fd_out);
   fclose(fd_mic);
+  speex_ec_close();
 }
 
 int pull(JNIEnv *env, jshortArray buf)
 {
   jshort *_buf = env->GetShortArrayElements(buf, NULL);
-  int n = read_circular_buffer(recbuf, _buf, VECSAMPS_MONO);
+  int n = read_circular_buffer(recbuf, _buf, FRAME_SAMPS);
   env->ReleaseShortArrayElements(buf, _buf, 0);
   return n;
 }
@@ -167,10 +160,10 @@ int push(JNIEnv *env, jshortArray farend)
 
   // analyze
   t_analyze.push(timestamp(t_start));
-  WebRtcAecm_BufferFarend(aecm, _farend, VECSAMPS_MONO);
+  write_circular_buffer(playbuf, _farend, samps);
 
   // render
-  t_render.push(timestamp(t_start) + BUFFERFRAMES / VECSAMPS_MONO * 10);
+  t_render.push(timestamp(t_start) + BUFFERFRAMES / FRAME_SAMPS * FRAME_MS);
   if (android_AudioOut(p,_farend,samps) != samps)
     rtn = 0; 
 
@@ -183,26 +176,17 @@ double getTimestamp()
   return android_GetTimestamp(p);
 }
 
-void speex_ec_open (JNIEnv *env, int sampleRate, int bufsize, int totalSize)
+void speex_ec_open (int sampleRate, int bufsize, int totalSize)
 {
-     //init
-     st = speex_echo_state_init(bufsize, totalSize);
-     den = speex_preprocess_state_init(bufsize, sampleRate);
-     speex_echo_ctl(st, SPEEX_ECHO_SET_SAMPLING_RATE, &sampleRate);
-     speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_ECHO_STATE, st);
-     int value = 1;
-     speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value);
-     speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value);
-     speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_DENOISE, &value);
-}
-
-void speex_ec_process (JNIEnv * env, short* input_frame, short* echo_frame, int len,
-    short* output_frame)
-{
-  //call echo cancellation
-  speex_echo_cancellation(st, input_frame, echo_frame, output_frame);
-  //preprocess output frame
-  //speex_preprocess_run(den, native_output_frame);
+  //init
+  st = speex_echo_state_init(bufsize, totalSize);
+  den = speex_preprocess_state_init(bufsize, sampleRate);
+  speex_echo_ctl(st, SPEEX_ECHO_SET_SAMPLING_RATE, &sampleRate);
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_ECHO_STATE, st);
+  int value = 1;
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value);
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value);
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_DENOISE, &value);
 }
 
 void speex_ec_close ()
