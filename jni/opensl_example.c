@@ -117,7 +117,7 @@ void run()
   // delay between play and rec in samples
   int delay = (BUFFERFRAMES / FRAME_SAMPS) /* recorder buffer queue */
     + 2 /* play latency */
-    //+ 10 /* extra play latency */
+    + 10 /* extra play latency */
     ;
   i = 0;
   while(on) {
@@ -131,6 +131,7 @@ void run()
     speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
     speex_preprocess_run(den, processedbuffer);
     dump_audio(processedbuffer, fd_out);
+    write_circular_buffer(recbuf, processedbuffer, FRAME_SAMPS);
   }  
 
   android_CloseAudioDevice(p);
