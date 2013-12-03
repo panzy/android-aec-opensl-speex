@@ -56,7 +56,9 @@ int64 t_start;
 std::queue<int64> t_render;
 std::queue<int64> t_analyze;
 
-FILE *fd_out = NULL;
+// dump audio data
+FILE *fd_farend = NULL;
+FILE *fd_nearend = NULL;
 FILE *fd_mic = NULL;
 
 // get timestamp of today in ms.
@@ -89,7 +91,8 @@ void init()
 
   p = android_OpenAudioDevice(SR,1,1,BUFFERFRAMES);
   if(p == NULL) return; 
-  fd_out = fopen("/mnt/sdcard/tmp/out.dat", "w+");
+  fd_farend = fopen("/mnt/sdcard/tmp/in.dat", "w+");
+  fd_nearend = fopen("/mnt/sdcard/tmp/out.dat", "w+");
   fd_mic = fopen("/mnt/sdcard/tmp/mic.dat", "w+");
   t_start = timestamp(0) - 2000;
   on = 1;
@@ -120,7 +123,7 @@ void run()
           delay, t_render.front(), t_analyze.front(), t_process, t_capture);
       //write_circular_buffer(recbuf, processedbuffer, VECSAMPS_MONO);
       dump_audio(processedbuffer, fd_mic);
-      dump_audio(processedbuffer2, fd_out);
+      dump_audio(processedbuffer2, fd_nearend);
       t_render.pop();
       t_analyze.pop();
     }
@@ -129,7 +132,7 @@ void run()
       //__android_log_print(ANDROID_LOG_DEBUG, "webrtc", "aecm process skipped");
       //write_circular_buffer(recbuf, processedbuffer, VECSAMPS_MONO);
       dump_audio(processedbuffer, fd_mic);
-      dump_audio(processedbuffer, fd_out);
+      dump_audio(processedbuffer, fd_nearend);
     }
   }  
 
@@ -141,7 +144,8 @@ void run()
 void close()
 {
   on = 0;
-  fclose(fd_out);
+  fclose(fd_farend);
+  fclose(fd_nearend);
   fclose(fd_mic);
 }
 
@@ -162,6 +166,7 @@ int push(JNIEnv *env, jshortArray farend)
   // analyze
   t_analyze.push(timestamp(t_start));
   WebRtcAecm_BufferFarend(aecm, _farend, VECSAMPS_MONO);
+  dump_audio(_farend, fd_farend);
 
   // render
   t_render.push(timestamp(t_start) + BUFFERFRAMES / VECSAMPS_MONO * 10);
