@@ -324,7 +324,8 @@ static void openSLDestroyEngine(OPENSL_STREAM *p){
 
 
 // open the android audio device for input and/or output
-OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels, int bufferframes){
+OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
+        int bufferframes){
   
   OPENSL_STREAM *p;
   p = (OPENSL_STREAM *) malloc(sizeof(OPENSL_STREAM));
@@ -421,7 +422,8 @@ void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
   OPENSL_STREAM *p = (OPENSL_STREAM *) context;
   int count = p->inBufSamples;
   write_circular_buffer(p->inrb, p->recBuffer,count);
-  (*p->recorderBufferQueue)->Enqueue(p->recorderBufferQueue,p->recBuffer,count*sizeof(short));
+  (*p->recorderBufferQueue)->Enqueue(p->recorderBufferQueue,p->recBuffer,
+          count*sizeof(short));
 }
  
 // gets a buffer of size samples from the device
@@ -442,9 +444,14 @@ int android_AudioIn(OPENSL_STREAM *p,short *buffer,int size){
 void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
   OPENSL_STREAM *p = (OPENSL_STREAM *) context;
-  int count = p->outBufSamples;
-  read_circular_buffer(p->outrb,p->playBuffer,count);
-  (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue,p->playBuffer,count*sizeof(short));
+  int count = read_circular_buffer(p->outrb,p->playBuffer,p->outBufSamples);
+  if (count < p->outBufSamples) {
+      memset(p->playBuffer + count * sizeof(short), 0,
+              (p->outBufSamples - count) * sizeof(short));
+      count = p->outBufSamples;
+  }
+  (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue,
+          p->playBuffer,count*sizeof(short));
 }
 
 // return: 0 or count.
