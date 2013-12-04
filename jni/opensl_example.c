@@ -91,8 +91,8 @@ void init()
 
   p = android_OpenAudioDevice(SR,1,1,BUFFERFRAMES);
   if(p == NULL) return; 
-  fd_farend = fopen("/mnt/sdcard/tmp/in.dat", "w+");
-  fd_nearend = fopen("/mnt/sdcard/tmp/out.dat", "w+");
+  fd_farend = fopen("/mnt/sdcard/tmp/far.dat", "w+");
+  fd_nearend = fopen("/mnt/sdcard/tmp/near.dat", "w+");
   fd_mic = fopen("/mnt/sdcard/tmp/mic.dat", "w+");
   t_start = timestamp(0) - 2000;
   on = 1;
