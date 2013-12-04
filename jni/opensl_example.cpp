@@ -107,7 +107,7 @@ void dump_audio(short *frame, FILE *fd)
 void init()
 {
   recbuf = create_circular_buffer(BUFFERFRAMES);
-  playbuf = create_circular_buffer(BUFFERFRAMES * 3);
+  playbuf = create_circular_buffer(FRAME_SAMPS * 100);
 
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
 
@@ -135,7 +135,7 @@ void run()
     + 2 /* play latency */
     //+ 80 /* extra play latency */
     ;
-  delay = 0;
+  delay = 60; // 在 xoom 上测试得到延迟大约为 1250ms。
   int loopIdx = 0;
   while(on) {
     int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
