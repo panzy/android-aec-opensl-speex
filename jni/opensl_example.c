@@ -71,8 +71,8 @@ std::queue<int64> t_analyze;
 
 // dump audio data
 FILE *fd_farend = NULL;
+FILE *fd_send = NULL;
 FILE *fd_nearend = NULL;
-FILE *fd_mic = NULL;
 
 // get timestamp of today in ms.
 int64 timestamp(int64 base)
@@ -104,8 +104,8 @@ void init()
 
   if(p == NULL) return; 
   fd_farend = fopen("/mnt/sdcard/tmp/far.dat", "w+");
+  fd_send = fopen("/mnt/sdcard/tmp/send.dat", "w+");
   fd_nearend = fopen("/mnt/sdcard/tmp/near.dat", "w+");
-  fd_mic = fopen("/mnt/sdcard/tmp/mic.dat", "w+");
   t_start = timestamp(0) - 2000;
   on = 1;
 }
@@ -129,12 +129,12 @@ void run()
     // discard head frames
     if (i++ < delay) continue;
 
-    dump_audio(inbuffer, fd_mic);
+    dump_audio(inbuffer, fd_nearend);
     read_circular_buffer(playbuf, refbuf, FRAME_SAMPS);
     speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
     speex_preprocess_run(den, processedbuffer);
-    dump_audio(processedbuffer, fd_nearend);
     write_circular_buffer(recbuf, processedbuffer, FRAME_SAMPS);
+    dump_audio(processedbuffer, fd_send);
   }  
 
   android_CloseAudioDevice(p);
@@ -144,8 +144,8 @@ void close()
 {
   on = 0;
   fclose(fd_farend);
+  fclose(fd_send);
   fclose(fd_nearend);
-  fclose(fd_mic);
   speex_ec_close();
 }
 
