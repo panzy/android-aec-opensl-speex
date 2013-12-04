@@ -90,6 +90,7 @@ public class AudiotestActivity extends Activity {
                             long t2 = System.currentTimeMillis();
                             Log.d(TAG, "push elapse " + (t2 - t));
                             t = t2;
+                            Thread.sleep(FRAME_MS - 1);
                         }
                         Log.d(TAG, "audio timestamp by opensl " + opensl_example.getTimestamp());
                         Log.d(TAG, "audio timestamp by java " + (System.currentTimeMillis() - t0));
@@ -97,6 +98,7 @@ public class AudiotestActivity extends Activity {
                     fis.close();
                 } catch (FileNotFoundException e) {
                 } catch (IOException e) {
+                } catch (InterruptedException e) {
                 }
             }
         };

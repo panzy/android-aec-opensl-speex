@@ -40,7 +40,7 @@ extern "C" {
 
 
 typedef struct _circular_buffer {
-  char *buffer;
+  short *buffer;
   int  wp;
   int rp;
   int size;
@@ -98,16 +98,21 @@ typedef struct opensl_stream {
   /* 
   Read a buffer from the OpenSL stream *p, of size samples. Returns the number of samples read.
   */
-  int android_AudioIn(OPENSL_STREAM *p, float *buffer,int size);
+  int android_AudioIn(OPENSL_STREAM *p, short *buffer,int size);
   /*
   Write a buffer to the OpenSL stream *p, of size samples. Returns the number of samples written.
   */
-  int android_AudioOut(OPENSL_STREAM *p, float *buffer,int size);
+  int android_AudioOut(OPENSL_STREAM *p, short *buffer,int size);
   /*
   Get the current IO block time in seconds
   */
   double android_GetTimestamp(OPENSL_STREAM *p);
   
+  circular_buffer* create_circular_buffer(int shorts);
+  int checkspace_circular_buffer(circular_buffer *p, int writeCheck);
+  int read_circular_buffer(circular_buffer *p, short *out, int shorts);
+  int write_circular_buffer(circular_buffer *p, const short *in, int shorts);
+  void free_circular_buffer (circular_buffer *p);
 #ifdef __cplusplus
 };
 #endif

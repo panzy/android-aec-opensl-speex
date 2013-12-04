@@ -28,16 +28,11 @@
 */
 
 #include "opensl_io2.h"
-#define CONV16BIT 32768
-#define CONVMYFLT (1./32768.)
-#define GRAIN 4
 
 static void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context);
 static void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context);
-circular_buffer* create_circular_buffer(int bytes);
+circular_buffer* create_circular_buffer(int count);
 int checkspace_circular_buffer(circular_buffer *p, int writeCheck);
-int read_circular_buffer_bytes(circular_buffer *p, char *out, int bytes);
-int write_circular_buffer_bytes(circular_buffer *p, const char *in, int bytes);
 void free_circular_buffer (circular_buffer *p);
 
 // creates the OpenSL ES audio engine
@@ -352,11 +347,11 @@ OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels, 
     }
   }
 
-  if((p->outrb = create_circular_buffer(p->outBufSamples*sizeof(short)*4)) == NULL) {
+  if((p->outrb = create_circular_buffer(p->outBufSamples*4)) == NULL) {
       android_CloseAudioDevice(p);
       return NULL; 
   }
- if((p->inrb = create_circular_buffer(p->outBufSamples*sizeof(short)*4)) == NULL) {
+ if((p->inrb = create_circular_buffer(p->outBufSamples*4)) == NULL) {
       android_CloseAudioDevice(p);
       return NULL; 
   }
@@ -424,20 +419,20 @@ double android_GetTimestamp(OPENSL_STREAM *p){
 void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
   OPENSL_STREAM *p = (OPENSL_STREAM *) context;
-  int bytes = p->inBufSamples*sizeof(short);
-  write_circular_buffer_bytes(p->inrb, (char *) p->recBuffer,bytes);
-  (*p->recorderBufferQueue)->Enqueue(p->recorderBufferQueue,p->recBuffer,bytes);
+  int count = p->inBufSamples;
+  write_circular_buffer(p->inrb, p->recBuffer,count);
+  (*p->recorderBufferQueue)->Enqueue(p->recorderBufferQueue,p->recBuffer,count*sizeof(short));
 }
  
 // gets a buffer of size samples from the device
-int android_AudioIn(OPENSL_STREAM *p,float *buffer,int size){
+int android_AudioIn(OPENSL_STREAM *p,short *buffer,int size){
   short *inBuffer;
-  int i, bytes = size*sizeof(short);
+  int i, count = size;
   if(p == NULL ||  p->inBufSamples ==  0) return 0;
-  bytes = read_circular_buffer_bytes(p->inrb,(char *)p->inputBuffer,bytes);
-  size = bytes/sizeof(short);
+  count = read_circular_buffer(p->inrb,p->inputBuffer,count);
+  size = count;
   for(i=0; i < size; i++){
-    buffer[i] = (float) p->inputBuffer[i]*CONVMYFLT;
+    buffer[i] =  p->inputBuffer[i];
   }
   if(p->outchannels == 0) p->time += (double) size/(p->sr*p->inchannels);
   return size;
@@ -447,34 +442,69 @@ int android_AudioIn(OPENSL_STREAM *p,float *buffer,int size){
 void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
   OPENSL_STREAM *p = (OPENSL_STREAM *) context;
-  int bytes = p->outBufSamples*sizeof(short);
-  read_circular_buffer_bytes(p->outrb, (char *) p->playBuffer,bytes);
-  (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue,p->playBuffer,bytes);
+  int count = p->outBufSamples;
+  read_circular_buffer(p->outrb,p->playBuffer,count);
+  (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue,p->playBuffer,count*sizeof(short));
 }
 
-// puts a buffer of size samples to the device
-int android_AudioOut(OPENSL_STREAM *p, float *buffer,int size){
+// return: 0 or count.
+int read_circular_buffer(circular_buffer *p, short *out, int count){
+  int remaining;
+  int size = p->size;
+  int i=0, rp = p->rp;
+  short *buffer = p->buffer;
+  if ((remaining = checkspace_circular_buffer(p, 0)) < count) {
+    return 0;
+  }
+  for(i=0; i < count; i++){
+    out[i] = buffer[rp++];
+    if(rp == size) rp = 0;
+  }
+  p->rp = rp;
+  return count;
+}
+
+int write_circular_buffer(circular_buffer *p, const short *in, int count){
+  int remaining;
+  int countwrite, size = p->size;
+  int i=0, wp = p->wp;
+  short *buffer = p->buffer;
+  if ((remaining = checkspace_circular_buffer(p, 1)) == 0) {
+    return 0;
+  }
+  countwrite = count > remaining ? remaining : count;
+  for(i=0; i < countwrite; i++){
+    buffer[wp++] = in[i];
+    if(wp == size) wp = 0;
+  }
+  p->wp = wp;
+  return countwrite;
+}
+
+// puts a buffer of size samples to the device.
+// non-block.
+int android_AudioOut(OPENSL_STREAM *p, short *buffer,int size){
 
   short *outBuffer, *inBuffer;
-  int i, bytes = size*sizeof(short);
+  int i, count = size;
   if(p == NULL  ||  p->outBufSamples ==  0)  return 0;
   for(i=0; i < size; i++){
-    p->outputBuffer[i] = (short) (buffer[i]*CONV16BIT);
+    p->outputBuffer[i] = buffer[i];
   }
-  bytes = write_circular_buffer_bytes(p->outrb, (char *) p->outputBuffer,bytes);
+  count = write_circular_buffer(p->outrb, p->outputBuffer,count);
   p->time += (double) size/(p->sr*p->outchannels);
-  return bytes/sizeof(short);
+  return count;
 }
 
-circular_buffer* create_circular_buffer(int bytes){
+circular_buffer* create_circular_buffer(int count){
   circular_buffer *p;
   if ((p = calloc(1, sizeof(circular_buffer))) == NULL) {
     return NULL;
   }
-  p->size = bytes;
+  p->size = count;
   p->wp = p->rp = 0;
    
-  if ((p->buffer = calloc(bytes, sizeof(char))) == NULL) {
+  if ((p->buffer = calloc(count, sizeof(short))) == NULL) {
     free (p);
     return NULL;
   }
@@ -493,40 +523,6 @@ int checkspace_circular_buffer(circular_buffer *p, int writeCheck){
     else if (wp < rp) return wp - rp + size;
     else return 0;
   }	
-}
-
-int read_circular_buffer_bytes(circular_buffer *p, char *out, int bytes){
-  int remaining;
-  int bytesread, size = p->size;
-  int i=0, rp = p->rp;
-  char *buffer = p->buffer;
-  if ((remaining = checkspace_circular_buffer(p, 0)) == 0) {
-    return 0;
-  }
-  bytesread = bytes > remaining ? remaining : bytes;
-  for(i=0; i < bytesread; i++){
-    out[i] = buffer[rp++];
-    if(rp == size) rp = 0;
-  }
-  p->rp = rp;
-  return bytesread;
-}
-
-int write_circular_buffer_bytes(circular_buffer *p, const char *in, int bytes){
-  int remaining;
-  int byteswrite, size = p->size;
-  int i=0, wp = p->wp;
-  char *buffer = p->buffer;
-  if ((remaining = checkspace_circular_buffer(p, 1)) == 0) {
-    return 0;
-  }
-  byteswrite = bytes > remaining ? remaining : bytes;
-  for(i=0; i < byteswrite; i++){
-    buffer[wp++] = in[i];
-    if(wp == size) wp = 0;
-  }
-  p->wp = wp;
-  return byteswrite;
 }
 
 void

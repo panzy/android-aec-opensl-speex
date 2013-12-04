@@ -34,7 +34,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <queue>
 #include <stdio.h>
 #include <unistd.h>
-#include "opensl_io.h"
+#include "opensl_io2.h"
 
 #include "speex/speex_echo.h"
 #include "speex/speex_preprocess.h"
@@ -44,7 +44,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define SR 8000 // sample rate
 #define FRAME_SAMPS 160
 #define FRAME_MS (1000 * FRAME_SAMPS / SR)
-#define BUFFERFRAMES (FRAME_SAMPS * 50) // queue size in samples
+#define BUFFERFRAMES (FRAME_SAMPS * 20) // queue size in samples
 
 #define TAG "aec" // log tag
 
@@ -133,8 +133,9 @@ void run()
   // delay between play and rec in samples
   int delay = (BUFFERFRAMES / FRAME_SAMPS) /* recorder buffer queue */
     + 2 /* play latency */
-    + 80 /* extra play latency */
+    //+ 80 /* extra play latency */
     ;
+  delay = 0;
   int loopIdx = 0;
   while(on) {
     int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
