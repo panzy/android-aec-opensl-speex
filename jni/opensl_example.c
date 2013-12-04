@@ -69,7 +69,9 @@ int64 t_start;
 std::queue<int64> t_render;
 std::queue<int64> t_analyze;
 
-FILE *fd_out = NULL;
+// dump audio data
+FILE *fd_farend = NULL;
+FILE *fd_nearend = NULL;
 FILE *fd_mic = NULL;
 
 // get timestamp of today in ms.
@@ -101,7 +103,8 @@ void init()
   p = android_OpenAudioDevice(SR,1,1,BUFFERFRAMES);
 
   if(p == NULL) return; 
-  fd_out = fopen("/mnt/sdcard/tmp/out.dat", "w+");
+  fd_farend = fopen("/mnt/sdcard/tmp/in.dat", "w+");
+  fd_nearend = fopen("/mnt/sdcard/tmp/out.dat", "w+");
   fd_mic = fopen("/mnt/sdcard/tmp/mic.dat", "w+");
   t_start = timestamp(0) - 2000;
   on = 1;
@@ -130,7 +133,7 @@ void run()
     read_circular_buffer(playbuf, refbuf, FRAME_SAMPS);
     speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
     speex_preprocess_run(den, processedbuffer);
-    dump_audio(processedbuffer, fd_out);
+    dump_audio(processedbuffer, fd_nearend);
     write_circular_buffer(recbuf, processedbuffer, FRAME_SAMPS);
   }  
 
@@ -140,7 +143,8 @@ void run()
 void close()
 {
   on = 0;
-  fclose(fd_out);
+  fclose(fd_farend);
+  fclose(fd_nearend);
   fclose(fd_mic);
   speex_ec_close();
 }
@@ -162,6 +166,7 @@ int push(JNIEnv *env, jshortArray farend)
   // analyze
   t_analyze.push(timestamp(t_start));
   write_circular_buffer(playbuf, _farend, samps);
+  dump_audio(_farend, fd_farend);
 
   // render
   t_render.push(timestamp(t_start) + BUFFERFRAMES / FRAME_SAMPS * FRAME_MS);
