@@ -120,23 +120,27 @@ void run()
   // delay between play and rec in samples
   int delay = (BUFFERFRAMES / FRAME_SAMPS) /* recorder buffer queue */
     + 2 /* play latency */
-    + 10 /* extra play latency */
+    + 155 /* extra play latency */
     ;
   i = 0;
   while(on) {
     samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
 
-    // discard head frames
-    if (i++ < delay) continue;
-
     if (samps != FRAME_SAMPS) continue;
 
-    dump_audio(inbuffer, fd_nearend);
-    read_circular_buffer(playbuf, refbuf, FRAME_SAMPS);
-    speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
-    speex_preprocess_run(den, processedbuffer);
-    write_circular_buffer(recbuf, processedbuffer, FRAME_SAMPS);
-    dump_audio(processedbuffer, fd_send);
+    if (i++ < delay) {
+      // echo does not occur yet
+      write_circular_buffer(recbuf, inbuffer, FRAME_SAMPS);
+      dump_audio(inbuffer, fd_send);
+    } else {
+      // do AEC
+      dump_audio(inbuffer, fd_nearend);
+      read_circular_buffer(playbuf, refbuf, FRAME_SAMPS);
+      speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
+      speex_preprocess_run(den, processedbuffer);
+      write_circular_buffer(recbuf, processedbuffer, FRAME_SAMPS);
+      dump_audio(processedbuffer, fd_send);
+    }
   }  
 
   android_CloseAudioDevice(p);
