@@ -45,6 +45,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define FRAME_MS (1000 * FRAME_SAMPS / SR)
 #define BUFFERFRAMES (FRAME_SAMPS * 50) // queue size in samples
 
+#define TAG "aec" // log tag
+
 //--------------------------------------------------------------------------------
 
 void speex_ec_open (int sampleRate, int bufsize, int totalSize);
@@ -168,8 +170,20 @@ int pull(JNIEnv *env, jshortArray buf)
 
 int push(JNIEnv *env, jshortArray farend)
 {
+  static int audio_duration = 0; // duration of pushed audio in ms
+  static int64 t_first_push = 0;
+
   if (!playbuf)
     return 0;
+
+  int64 now = timestamp(0);
+  if (t_first_push == 0)
+    t_first_push = now;
+  if (now - t_first_push > audio_duration) {
+    __android_log_print(ANDROID_LOG_WARN, TAG, "playback underrun, time elapsed: %lldms, audio duration: %dms, gap %lldms", 
+        now - t_first_push, audio_duration, now - t_first_push - audio_duration);
+  }
+  audio_duration += FRAME_MS;
 
   jshort *_farend = env->GetShortArrayElements(farend, NULL);
   jsize samps = env->GetArrayLength(farend);
