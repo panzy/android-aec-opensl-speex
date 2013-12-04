@@ -33,6 +33,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assert.h>
 #include <queue>
 #include <stdio.h>
+#include <unistd.h>
 #include "opensl_io.h"
 
 #include "speex/speex_echo.h"
@@ -47,17 +48,18 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #define TAG "aec" // log tag
 
+typedef long long int64;
+
 //--------------------------------------------------------------------------------
 
 void speex_ec_open (int sampleRate, int bufsize, int totalSize);
 void speex_ec_close ();
+int push_helper(short *_farend);
 
 //--------------------------------------------------------------------------------
 
 SpeexEchoState *st;
 SpeexPreprocessState *den;
-
-typedef long long int64;
 
 static int on;
 OPENSL_STREAM  *p = NULL;
@@ -71,10 +73,17 @@ int64 t_start;
 std::queue<int64> t_render;
 std::queue<int64> t_analyze;
 
+int farend_duration = 0; // duration of pushed audio in ms
+int64 t_first_push = 0;
+
 // dump audio data
 FILE *fd_farend = NULL;
 FILE *fd_send = NULL;
 FILE *fd_nearend = NULL;
+
+short silence[FRAME_SAMPS];
+
+//----------------------------------------------------------------------
 
 // get timestamp of today in ms.
 int64 timestamp(int64 base)
@@ -109,12 +118,14 @@ void init()
   fd_send = fopen("/mnt/sdcard/tmp/send.dat", "w+");
   fd_nearend = fopen("/mnt/sdcard/tmp/near.dat", "w+");
   t_start = timestamp(0) - 2000;
+  farend_duration = 0;
+  t_first_push = 0;
+  memset(silence, 0, FRAME_SAMPS * sizeof(short));
   on = 1;
 }
 
 void run() 
 {
-  int samps, i, j;
   short inbuffer[FRAME_SAMPS]; // record
   short refbuf[FRAME_SAMPS];
   short processedbuffer[FRAME_SAMPS];
@@ -122,15 +133,15 @@ void run()
   // delay between play and rec in samples
   int delay = (BUFFERFRAMES / FRAME_SAMPS) /* recorder buffer queue */
     + 2 /* play latency */
-    + 155 /* extra play latency */
+    + 80 /* extra play latency */
     ;
-  i = 0;
+  int loopIdx = 0;
   while(on) {
-    samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
+    int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
 
     if (samps != FRAME_SAMPS) continue;
 
-    if (i++ < delay) {
+    if (loopIdx++ < delay) {
       // echo does not occur yet
       write_circular_buffer(recbuf, inbuffer, FRAME_SAMPS);
       dump_audio(inbuffer, fd_send);
@@ -146,6 +157,22 @@ void run()
   }  
 
   android_CloseAudioDevice(p);
+}
+
+void startUnderrunCompensate()
+{
+  while (on) {
+    int64 now = timestamp(0);
+    int64 delta;
+    if (t_first_push > 0 && (delta = now - t_first_push - farend_duration) > 0) {
+      __android_log_print(ANDROID_LOG_WARN, TAG, "playback underrun, time elapsed: %lldms, audio duration: %dms, gap %lldms", 
+          now - t_first_push, farend_duration, delta);
+      int n = delta / FRAME_MS;
+      for (int j = 0; j < n; ++j)
+        push_helper(silence);
+    }
+    sleep(FRAME_MS / 2);
+  }
 }
 
 void close()
@@ -168,37 +195,40 @@ int pull(JNIEnv *env, jshortArray buf)
   return n;
 }
 
-int push(JNIEnv *env, jshortArray farend)
+int push_helper(short *_farend)
 {
-  static int audio_duration = 0; // duration of pushed audio in ms
-  static int64 t_first_push = 0;
-
+  // TODO thread-safe
   if (!playbuf)
     return 0;
 
-  int64 now = timestamp(0);
-  if (t_first_push == 0)
-    t_first_push = now;
-  if (now - t_first_push > audio_duration) {
-    __android_log_print(ANDROID_LOG_WARN, TAG, "playback underrun, time elapsed: %lldms, audio duration: %dms, gap %lldms", 
-        now - t_first_push, audio_duration, now - t_first_push - audio_duration);
+  if (t_first_push == 0) {
+    t_first_push = timestamp(0);
   }
-  audio_duration += FRAME_MS;
+  farend_duration += FRAME_MS;
 
-  jshort *_farend = env->GetShortArrayElements(farend, NULL);
-  jsize samps = env->GetArrayLength(farend);
-  int rtn = samps;
+  int rtn = FRAME_SAMPS;
 
   // analyze
   t_analyze.push(timestamp(t_start));
-  write_circular_buffer(playbuf, _farend, samps);
+  write_circular_buffer(playbuf, _farend, FRAME_SAMPS);
   dump_audio(_farend, fd_farend);
 
   // render
   t_render.push(timestamp(t_start) + BUFFERFRAMES / FRAME_SAMPS * FRAME_MS);
-  if (android_AudioOut(p,_farend,samps) != samps)
+  if (android_AudioOut(p,_farend,FRAME_SAMPS) != FRAME_SAMPS)
     rtn = 0; 
 
+  return rtn;
+}
+
+int push(JNIEnv *env, jshortArray farend)
+{
+  if (!playbuf)
+    return 0;
+
+  jshort *_farend = env->GetShortArrayElements(farend, NULL);
+  jsize samps = env->GetArrayLength(farend);
+  int rtn = samps == FRAME_SAMPS ? push_helper(_farend) : 0;
   env->ReleaseShortArrayElements(farend, _farend, 0);
   return rtn;
 }
@@ -223,7 +253,13 @@ void speex_ec_open (int sampleRate, int bufsize, int totalSize)
 
 void speex_ec_close ()
 {
-  speex_echo_state_destroy(st);
-  speex_preprocess_state_destroy(den);
+  if (st) {
+    speex_echo_state_destroy(st);
+    st = NULL;
+  }
+  if (den) {
+    speex_preprocess_state_destroy(den);
+    den = NULL;
+  }
 }
 

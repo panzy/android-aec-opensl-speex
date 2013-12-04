@@ -29,6 +29,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 void init();
 void run();
+void startUnderrunCompensate();
 void close();
 /* Enqueue audio frame to play. 
  * Will block if the queue is full.
