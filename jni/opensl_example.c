@@ -129,6 +129,8 @@ void run()
     // discard head frames
     if (i++ < delay) continue;
 
+    if (samps != FRAME_SAMPS) continue;
+
     dump_audio(inbuffer, fd_nearend);
     read_circular_buffer(playbuf, refbuf, FRAME_SAMPS);
     speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
@@ -146,11 +148,14 @@ void close()
   fclose(fd_farend);
   fclose(fd_send);
   fclose(fd_nearend);
+  fd_farend = fd_send = fd_nearend = NULL;
   speex_ec_close();
 }
 
 int pull(JNIEnv *env, jshortArray buf)
 {
+  if (!recbuf)
+    return 0;
   jshort *_buf = env->GetShortArrayElements(buf, NULL);
   int n = read_circular_buffer(recbuf, _buf, FRAME_SAMPS);
   env->ReleaseShortArrayElements(buf, _buf, 0);
@@ -159,6 +164,9 @@ int pull(JNIEnv *env, jshortArray buf)
 
 int push(JNIEnv *env, jshortArray farend)
 {
+  if (!playbuf)
+    return 0;
+
   jshort *_farend = env->GetShortArrayElements(farend, NULL);
   jsize samps = env->GetArrayLength(farend);
   int rtn = samps;
