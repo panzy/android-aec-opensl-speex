@@ -27,7 +27,14 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-/* 开始播放和录音。*/
+/* 开始播放和录音。
+ *
+ * 音频参数：
+ *  Sample Rate = 8kHz
+ *  Sample Foramt = signed 16-bit PCM
+ *  Byte order = Little-endian
+ *  Channels = 1
+ * */
 void start();
 /* 持续处理录音。*/
 void runNearendProcessing();

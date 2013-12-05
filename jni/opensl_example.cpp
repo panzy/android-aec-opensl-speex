@@ -191,7 +191,8 @@ int pull(JNIEnv *env, jshortArray buf)
   if (!recbuf)
     return 0;
   jshort *_buf = env->GetShortArrayElements(buf, NULL);
-  int n = read_circular_buffer(recbuf, _buf, FRAME_SAMPS);
+  jsize samps = env->GetArrayLength(buf);
+  int n = read_circular_buffer(recbuf, _buf, samps);
   env->ReleaseShortArrayElements(buf, _buf, 0);
   return n;
 }
@@ -227,7 +228,14 @@ int push(JNIEnv *env, jshortArray farend)
 
   jshort *_farend = env->GetShortArrayElements(farend, NULL);
   jsize samps = env->GetArrayLength(farend);
-  int rtn = samps == FRAME_SAMPS ? push_helper(_farend) : 0;
+  jshort *p = _farend;
+  int rtn = 0;
+  while(samps >= FRAME_SAMPS) {
+    push_helper(p);
+    p += FRAME_SAMPS;
+    samps -= FRAME_SAMPS;
+    rtn += FRAME_SAMPS;
+  }
   env->ReleaseShortArrayElements(farend, _farend, 0);
   return rtn;
 }
