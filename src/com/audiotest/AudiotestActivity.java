@@ -80,6 +80,7 @@ public class AudiotestActivity extends Activity {
                     if (fis != null) {
                         long t = System.currentTimeMillis();
                         long t0 = t;
+                        int loopIdx = 0;
                         while (thread != null && fis.read(bytes) > 0) {
                             ByteBuffer.wrap(bytes)
                                     .order(ByteOrder.LITTLE_ENDIAN)
@@ -92,7 +93,13 @@ public class AudiotestActivity extends Activity {
                             t = t2;
 
                             // 理想情况下应该暂停 FRAME_MS，这里为了模拟网络延迟和阻塞造成的丢包，随机调整暂停时间
-                            Thread.sleep((int)(FRAME_MS * (1.8 - Math.random())));
+                            if (false) {
+                                Thread.sleep((int)(FRAME_MS * (1.8 - Math.random())));
+                            } else {
+                                if (++loopIdx % 22 == 0) {
+                                    Thread.sleep(FRAME_MS * 22);
+                                }
+                            }
                         }
                         Log.d(TAG, "audio timestamp by opensl " + opensl_example.getTimestamp());
                         Log.d(TAG, "audio timestamp by java " + (System.currentTimeMillis() - t0));
@@ -104,7 +111,7 @@ public class AudiotestActivity extends Activity {
                     AudiotestActivity.this.runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            onBackPressed();
+                            AudiotestActivity.this.finish();
                         }
                     });
                 } catch (FileNotFoundException e) {

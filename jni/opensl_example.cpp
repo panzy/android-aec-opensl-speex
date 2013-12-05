@@ -48,7 +48,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define SR 8000 // sample rate
 #define FRAME_SAMPS 160
 #define FRAME_MS (1000 * FRAME_SAMPS / SR)
-#define BUFFERFRAMES (FRAME_SAMPS * 20) // queue size in samples
+// 提交给 OpenSL player buffer queue 的 buffer 的长度，
+// 如果上层调用 push() 的间隔大于此长度，播放将产生延迟。
+#define BUFFER_SAMPS (FRAME_SAMPS * 50)
 
 #define TAG "aec" // log tag
 
@@ -102,12 +104,12 @@ void dump_audio(short *frame, FILE *fd, int samps)
 
 void start()
 {
-  recbuf = create_circular_buffer(BUFFERFRAMES);
-  playbuf = create_circular_buffer(FRAME_SAMPS * 100);
+  recbuf = create_circular_buffer(FRAME_SAMPS * 20);
+  playbuf = create_circular_buffer(FRAME_SAMPS * 200);
 
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
 
-  p = android_OpenAudioDevice(SR,1,1,BUFFERFRAMES);
+  p = android_OpenAudioDevice(SR,1,1,BUFFER_SAMPS);
 
   if(p == NULL) return; 
   fd_farend = fopen("/mnt/sdcard/tmp/far.dat", "w+");
@@ -128,11 +130,15 @@ void runNearendProcessing()
   short processedbuffer[FRAME_SAMPS];
 
   // delay between play and rec in samples
-  int delay = (BUFFERFRAMES / FRAME_SAMPS) /* recorder buffer queue */
+  int delay = (BUFFER_SAMPS / FRAME_SAMPS) /* recorder buffer queue */
     + 2 /* play latency */
     //+ 80 /* extra play latency */
     ;
-  delay = 60; // 在 xoom 上测试得到延迟大约为 1250ms。
+  // BUFFER_SAMPS = 20x FRAME_SAMPS 时，在 xoom 上测试得到延迟大约为 1250ms。
+  // 50x 的话，延迟大约为 2100ms。
+  // !!! playbuf 必须能容纳这个 delay (2x will be fine)
+  delay = 60 + 42;
+
   int loopIdx = 0;
   while(on) {
     int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
@@ -214,7 +220,7 @@ int push_helper(short *_farend)
   dump_audio(_farend, fd_farend, FRAME_SAMPS);
 
   // render
-  t_render.push(timestamp(t_start) + BUFFERFRAMES / FRAME_SAMPS * FRAME_MS);
+  t_render.push(timestamp(t_start) + BUFFER_SAMPS / FRAME_SAMPS * FRAME_MS);
   if (android_AudioOut(p,_farend,FRAME_SAMPS) != FRAME_SAMPS)
     rtn = 0; 
 
