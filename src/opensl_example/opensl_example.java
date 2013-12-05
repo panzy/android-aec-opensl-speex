@@ -9,20 +9,20 @@
 package opensl_example;
 
 public class opensl_example {
-  public static void init() {
-    opensl_exampleJNI.init();
+  public static void start() {
+    opensl_exampleJNI.start();
   }
 
-  public static void run() {
-    opensl_exampleJNI.run();
+  public static void runNearendProcessing() {
+    opensl_exampleJNI.runNearendProcessing();
   }
 
-  public static void startUnderrunCompensate() {
-    opensl_exampleJNI.startUnderrunCompensate();
+  public static void runUnderrunCompensation() {
+    opensl_exampleJNI.runUnderrunCompensation();
   }
 
-  public static void close() {
-    opensl_exampleJNI.close();
+  public static void stop() {
+    opensl_exampleJNI.stop();
   }
 
   public static int push(short[] buf) {

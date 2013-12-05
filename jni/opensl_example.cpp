@@ -33,6 +33,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assert.h>
 #include <queue>
 #include <stdio.h>
+#include <inttypes.h>
 #include <unistd.h>
 #include "opensl_io2.h"
 
@@ -41,14 +42,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "opensl_example.h"
 
+// from <inttypes.h>
+#define	PRId64			"lld"		/* int64_t */
+
 #define SR 8000 // sample rate
 #define FRAME_SAMPS 160
 #define FRAME_MS (1000 * FRAME_SAMPS / SR)
 #define BUFFERFRAMES (FRAME_SAMPS * 20) // queue size in samples
 
 #define TAG "aec" // log tag
-
-typedef long long int64;
 
 //--------------------------------------------------------------------------------
 
@@ -69,12 +71,12 @@ circular_buffer *playbuf = NULL;
 
 void *aecm = NULL;
 
-int64 t_start;
-std::queue<int64> t_render;
-std::queue<int64> t_analyze;
+int64_t t_start;
+std::queue<int64_t> t_render;
+std::queue<int64_t> t_analyze;
 
 int farend_duration = 0; // duration of pushed audio in ms
-int64 t_first_push = 0;
+int64_t t_last_push = 0;
 
 // dump audio data
 FILE *fd_farend = NULL;
@@ -86,25 +88,19 @@ short silence[FRAME_SAMPS];
 //----------------------------------------------------------------------
 
 // get timestamp of today in ms.
-int64 timestamp(int64 base)
+int64_t timestamp(int64_t base)
 {
   timeval t;
   gettimeofday(&t, NULL);
-  return ((int64)t.tv_sec * 1000 + (int64)(t.tv_usec / 1000)) - base;
+  return ((int64_t)t.tv_sec * 1000 + (int64_t)(t.tv_usec / 1000)) - base;
 }
 
-void dump_audio(short *frame, FILE *fd)
+void dump_audio(short *frame, FILE *fd, int samps)
 {
-  //static float buf[FRAME_SAMPS];
-  //for (int i = 0; i < FRAME_SAMPS; ++i) {
-  //  buf[i] = frame[i] / 32768.0;
-  //}
-  //fwrite(buf, FRAME_SAMPS, 4, fd);
-
-  fwrite(frame, FRAME_SAMPS, 2, fd);
+  fwrite(frame, samps, 2, fd);
 }
 
-void init()
+void start()
 {
   recbuf = create_circular_buffer(BUFFERFRAMES);
   playbuf = create_circular_buffer(FRAME_SAMPS * 100);
@@ -117,14 +113,15 @@ void init()
   fd_farend = fopen("/mnt/sdcard/tmp/far.dat", "w+");
   fd_send = fopen("/mnt/sdcard/tmp/send.dat", "w+");
   fd_nearend = fopen("/mnt/sdcard/tmp/near.dat", "w+");
-  t_start = timestamp(0) - 2000;
+  t_start = timestamp(0);
+  t_last_push = 0;
   farend_duration = 0;
-  t_first_push = 0;
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
   on = 1;
+  __android_log_print(ANDROID_LOG_DEBUG, TAG, "start, %" PRId64 , t_start); 
 }
 
-void run() 
+void runNearendProcessing() 
 {
   short inbuffer[FRAME_SAMPS]; // record
   short refbuf[FRAME_SAMPS];
@@ -145,38 +142,41 @@ void run()
     if (loopIdx++ < delay) {
       // echo does not occur yet
       write_circular_buffer(recbuf, inbuffer, FRAME_SAMPS);
-      dump_audio(inbuffer, fd_send);
+      dump_audio(inbuffer, fd_send, FRAME_SAMPS);
     } else {
       // do AEC
-      dump_audio(inbuffer, fd_nearend);
+      dump_audio(inbuffer, fd_nearend, FRAME_SAMPS);
       read_circular_buffer(playbuf, refbuf, FRAME_SAMPS);
       speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
       speex_preprocess_run(den, processedbuffer);
       write_circular_buffer(recbuf, processedbuffer, FRAME_SAMPS);
-      dump_audio(processedbuffer, fd_send);
+      dump_audio(processedbuffer, fd_send, FRAME_SAMPS);
     }
   }  
 
   android_CloseAudioDevice(p);
 }
 
-void startUnderrunCompensate()
+void runUnderrunCompensation()
 {
+  int time_slice = FRAME_MS;
+  int slice_samps = FRAME_SAMPS;
   while (on) {
-    int64 now = timestamp(0);
-    int64 delta;
-    if (t_first_push > 0 && (delta = now - t_first_push - farend_duration) > 0) {
-      __android_log_print(ANDROID_LOG_WARN, TAG, "playback underrun, time elapsed: %lldms, audio duration: %dms, gap %lldms", 
-          now - t_first_push, farend_duration, delta);
-      int n = delta / FRAME_MS;
-      for (int j = 0; j < n; ++j)
-        push_helper(silence);
+    int64_t elapsed = timestamp(t_start);
+    int64_t delta = elapsed - farend_duration;
+    if (delta > FRAME_MS) {
+      __android_log_print(ANDROID_LOG_WARN, TAG, "playback underrun, time elapsed: %" PRId64 "ms, audio duration: %dms, gap %" PRId64 "ms", 
+          elapsed, farend_duration, delta);
+      farend_duration += time_slice;
+      android_AudioOut(p, silence, slice_samps);
+      write_circular_buffer(playbuf, silence, slice_samps);
+      dump_audio(silence, fd_farend, slice_samps);
     }
-    sleep(FRAME_MS / 2);
+    usleep(time_slice * 1000);
   }
 }
 
-void close()
+void stop()
 {
   on = 0;
   fclose(fd_farend);
@@ -202,9 +202,7 @@ int push_helper(short *_farend)
   if (!playbuf)
     return 0;
 
-  if (t_first_push == 0) {
-    t_first_push = timestamp(0);
-  }
+  t_last_push = timestamp(t_start);
   farend_duration += FRAME_MS;
 
   int rtn = FRAME_SAMPS;
@@ -212,7 +210,7 @@ int push_helper(short *_farend)
   // analyze
   t_analyze.push(timestamp(t_start));
   write_circular_buffer(playbuf, _farend, FRAME_SAMPS);
-  dump_audio(_farend, fd_farend);
+  dump_audio(_farend, fd_farend, FRAME_SAMPS);
 
   // render
   t_render.push(timestamp(t_start) + BUFFERFRAMES / FRAME_SAMPS * FRAME_MS);

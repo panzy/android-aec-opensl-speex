@@ -58,6 +58,7 @@ public class AudiotestActivity extends Activity {
 	Thread thread;
     Thread thread2;
     Thread thread3;
+    Thread thread4;
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -66,7 +67,7 @@ public class AudiotestActivity extends Activity {
         thread = new Thread() {
             public void run() {
                 setPriority(Thread.MAX_PRIORITY);
-                opensl_example.run();
+                opensl_example.runNearendProcessing();
             }
         };
 
@@ -84,18 +85,28 @@ public class AudiotestActivity extends Activity {
                                     .order(ByteOrder.LITTLE_ENDIAN)
                                     .asShortBuffer().get(buf);
 
-                            // push() will block if internal queue is full
                             if (opensl_example.push(buf) != FRAME_SAMPS)
                                 Log.d(TAG, "push failed");
                             long t2 = System.currentTimeMillis();
                             Log.d(TAG, "push elapse " + (t2 - t));
                             t = t2;
-                            Thread.sleep(FRAME_MS - 1);
+
+                            // 理想情况下应该暂停 FRAME_MS，这里为了模拟网络延迟和阻塞造成的丢包，随机调整暂停时间
+                            Thread.sleep((int)(FRAME_MS * (1.8 - Math.random())));
                         }
                         Log.d(TAG, "audio timestamp by opensl " + opensl_example.getTimestamp());
                         Log.d(TAG, "audio timestamp by java " + (System.currentTimeMillis() - t0));
                     }
                     fis.close();
+
+                    // exit app
+                    sleep(3000);
+                    AudiotestActivity.this.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            onBackPressed();
+                        }
+                    });
                 } catch (FileNotFoundException e) {
                 } catch (IOException e) {
                 } catch (InterruptedException e) {
@@ -128,10 +139,17 @@ public class AudiotestActivity extends Activity {
             }
         };
 
-        opensl_example.init();
+        thread4 = new Thread() {
+            public void run() {
+                opensl_example.runUnderrunCompensation();
+            }
+        };
+
+        opensl_example.start();
 		thread.start();
         thread2.start();
         //thread3.start();
+        thread4.start();
 
 
         checkAudioLowLatencyFeature();
@@ -161,7 +179,7 @@ public class AudiotestActivity extends Activity {
     public void onDestroy(){
     	
     	super.onDestroy();
-    	opensl_example.close();
+    	opensl_example.stop();
     	try {
             thread2.interrupt();
             thread3.interrupt();

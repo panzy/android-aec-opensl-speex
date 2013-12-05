@@ -21,10 +21,10 @@ public class opensl_exampleJNI {
     }
   }
 
-  public final static native void init();
-  public final static native void run();
-  public final static native void startUnderrunCompensate();
-  public final static native void close();
+  public final static native void start();
+  public final static native void runNearendProcessing();
+  public final static native void runUnderrunCompensation();
+  public final static native void stop();
   public final static native int push(short[] jarg2);
   public final static native int pull(short[] jarg2);
   public final static native double getTimestamp();

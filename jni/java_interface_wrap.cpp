@@ -218,31 +218,31 @@ static void SWIGUNUSED SWIG_JavaThrowException(JNIEnv *jenv, SWIG_JavaExceptionC
 extern "C" {
 #endif
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_init(JNIEnv *jenv, jclass jcls) {
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_start(JNIEnv *jenv, jclass jcls) {
   (void)jenv;
   (void)jcls;
-  init();
+  start();
 }
 
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_run(JNIEnv *jenv, jclass jcls) {
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_runNearendProcessing(JNIEnv *jenv, jclass jcls) {
   (void)jenv;
   (void)jcls;
-  run();
+  runNearendProcessing();
 }
 
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_startUnderrunCompensate(JNIEnv *jenv, jclass jcls) {
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_runUnderrunCompensation(JNIEnv *jenv, jclass jcls) {
   (void)jenv;
   (void)jcls;
-  startUnderrunCompensate();
+  runUnderrunCompensation();
 }
 
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_close(JNIEnv *jenv, jclass jcls) {
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_stop(JNIEnv *jenv, jclass jcls) {
   (void)jenv;
   (void)jcls;
-  close();
+  stop();
 }
 
 
