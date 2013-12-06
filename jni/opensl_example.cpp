@@ -46,11 +46,24 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define	PRId64			"lld"		/* int64_t */
 
 #define SR 8000 // sample rate
+
+// AEC frame, 10ms
 #define FRAME_SAMPS 160
 #define FRAME_MS (1000 * FRAME_SAMPS / SR)
+
+// 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
+// 供稳定的音频流。
+#define FAREND_BUFFER_SAMPS (FRAME_SAMPS * 150)
+#define FAREND_BUFFER_SAMPS_DELAY (FRAME_SAMPS * 70)
+
 // 提交给 OpenSL player buffer queue 的 buffer 的长度，
-// 如果上层调用 push() 的间隔大于此长度，播放将产生延迟。
-#define BUFFER_SAMPS (FRAME_SAMPS * 50)
+#define OPENSL_BUFFER_SAMPS (FRAME_SAMPS * 40)
+
+// 回声信号缓冲区，其长度要能容纳这个延迟：声音从被播放到被录音。
+#define ECHO_BUFFER_SAMPS (FRAME_SAMPS * 150)
+
+// 处理后的近端信号。
+#define NEAREND_BUFFER_SAMPS (FRAME_SAMPS * 10)
 
 #define TAG "aec" // log tag
 
@@ -58,7 +71,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 void speex_ec_open (int sampleRate, int bufsize, int totalSize);
 void speex_ec_close ();
-int push_helper(short *_farend);
+int push_helper(short *_farend, int samps);
 
 //--------------------------------------------------------------------------------
 
@@ -68,17 +81,15 @@ SpeexPreprocessState *den;
 static int on;
 OPENSL_STREAM  *p = NULL;
 
-circular_buffer *recbuf = NULL;
-circular_buffer *playbuf = NULL;
+circular_buffer *farend_buf = NULL;
+circular_buffer *nearend_buf = NULL;
+circular_buffer *echo_buf = NULL;
 
 void *aecm = NULL;
 
 int64_t t_start;
-std::queue<int64_t> t_render;
-std::queue<int64_t> t_analyze;
 
 int farend_duration = 0; // duration of pushed audio in ms
-int64_t t_last_push = 0;
 
 // dump audio data
 FILE *fd_farend = NULL;
@@ -104,22 +115,21 @@ void dump_audio(short *frame, FILE *fd, int samps)
 
 void start()
 {
-  recbuf = create_circular_buffer(FRAME_SAMPS * 20);
-  playbuf = create_circular_buffer(FRAME_SAMPS * 200);
-
+  farend_buf = create_circular_buffer(FAREND_BUFFER_SAMPS);
+  nearend_buf = create_circular_buffer(NEAREND_BUFFER_SAMPS);
+  echo_buf = create_circular_buffer(ECHO_BUFFER_SAMPS);
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
-
-  p = android_OpenAudioDevice(SR,1,1,BUFFER_SAMPS);
+  p = android_OpenAudioDevice(SR,1,1,OPENSL_BUFFER_SAMPS);
 
   if(p == NULL) return; 
+
+  on = 1;
   fd_farend = fopen("/mnt/sdcard/tmp/far.dat", "w+");
   fd_send = fopen("/mnt/sdcard/tmp/send.dat", "w+");
   fd_nearend = fopen("/mnt/sdcard/tmp/near.dat", "w+");
   t_start = timestamp(0);
-  t_last_push = 0;
   farend_duration = 0;
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
-  on = 1;
   __android_log_print(ANDROID_LOG_DEBUG, TAG, "start, %" PRId64 , t_start); 
 }
 
@@ -129,36 +139,79 @@ void runNearendProcessing()
   short refbuf[FRAME_SAMPS];
   short processedbuffer[FRAME_SAMPS];
 
-  // delay between play and rec in samples
-  int delay = (BUFFER_SAMPS / FRAME_SAMPS) /* recorder buffer queue */
-    + 2 /* play latency */
-    //+ 80 /* extra play latency */
+  // delay between play and rec in frames
+  int delay = // (FAREND_BUFFER_SAMPS_DELAY / FRAME_SAMPS) // farend buffer 引入的播放延迟
+    + 3 * (OPENSL_BUFFER_SAMPS / FRAME_SAMPS) // opensl rec buffer 引入的录音延迟
+    + 12 // 硬件延迟
     ;
-  // BUFFER_SAMPS = 20x FRAME_SAMPS 时，在 xoom 上测试得到延迟大约为 1250ms。
-  // 50x 的话，延迟大约为 2100ms。
-  // !!! playbuf 必须能容纳这个 delay (2x will be fine)
-  delay = 60 + 42;
+  if (delay >= ECHO_BUFFER_SAMPS / FRAME_SAMPS) {
+    __android_log_print(ANDROID_LOG_ERROR, TAG, "echo buffer is insufficiency, actual delay %d frames", delay);
+  }
 
-  int loopIdx = 0;
+  //
+  // 每次循环处理一个 FRAME
+  //
+  int loop_idx = 0;
+  int64_t t0 = timestamp(0), t1 = 0; // loop body begins
+  int64_t total_ahead = 0; // 累计剩余时间
+  int max_ahead = NEAREND_BUFFER_SAMPS / FRAME_SAMPS * FRAME_MS;
+  int min_ahead = max_ahead / 2;
   while(on) {
-    int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
+    t1 = timestamp(0);
+    ++loop_idx;
 
-    if (samps != FRAME_SAMPS) continue;
-
-    if (loopIdx++ < delay) {
-      // echo does not occur yet
-      write_circular_buffer(recbuf, inbuffer, FRAME_SAMPS);
-      dump_audio(inbuffer, fd_send, FRAME_SAMPS);
+    // playback
+    if (loop_idx < FAREND_BUFFER_SAMPS_DELAY / FRAME_SAMPS) {
+      push_helper(silence, FRAME_SAMPS);
     } else {
-      // do AEC
-      dump_audio(inbuffer, fd_nearend, FRAME_SAMPS);
-      read_circular_buffer(playbuf, refbuf, FRAME_SAMPS);
-      speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
-      speex_preprocess_run(den, processedbuffer);
-      write_circular_buffer(recbuf, processedbuffer, FRAME_SAMPS);
-      dump_audio(processedbuffer, fd_send, FRAME_SAMPS);
+      int samps = read_circular_buffer(farend_buf, inbuffer, FRAME_SAMPS);
+      if (samps > 0) {
+        push_helper(inbuffer, samps);
+      }
+      // pad underrun with silence
+      if (FRAME_SAMPS - samps > 0) {
+        push_helper(silence, FRAME_SAMPS -samps);
+      }
     }
-  }  
+
+    // record
+    int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
+    if (samps == FRAME_SAMPS) {
+      if (loop_idx < delay) {
+        // echo does not occur yet
+        write_circular_buffer(nearend_buf, inbuffer, FRAME_SAMPS);
+        dump_audio(inbuffer, fd_send, FRAME_SAMPS);
+      } else {
+        // do AEC
+        dump_audio(inbuffer, fd_nearend, FRAME_SAMPS);
+        read_circular_buffer(echo_buf, refbuf, FRAME_SAMPS);
+        speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
+        speex_preprocess_run(den, processedbuffer);
+        write_circular_buffer(nearend_buf, processedbuffer, FRAME_SAMPS);
+        dump_audio(processedbuffer, fd_send, FRAME_SAMPS);
+      }
+    }
+
+    //
+    // idle
+    //
+    // log current idle
+    if (0) {
+      int64_t curr_ahead = FRAME_MS - timestamp(t1);
+      if (curr_ahead > 0) {
+        __android_log_print(ANDROID_LOG_DEBUG, TAG, "idle: %"PRId64"ms", curr_ahead);
+      } else {
+        __android_log_print(ANDROID_LOG_DEBUG, TAG, "idle: overrun for %"PRId64"ms!", -curr_ahead);
+      }
+    }
+    // balance total idle
+    total_ahead = (loop_idx * FRAME_MS) - timestamp(t0);
+    if (total_ahead > max_ahead) {
+      total_ahead = total_ahead - min_ahead;
+      //__android_log_print(ANDROID_LOG_DEBUG, TAG, "idle: sleep %"PRId64"ms", total_ahead);
+      usleep(1000 * total_ahead);
+    }
+  }
 
   android_CloseAudioDevice(p);
 }
@@ -175,7 +228,7 @@ void runUnderrunCompensation()
           elapsed, farend_duration, delta);
       farend_duration += time_slice;
       android_AudioOut(p, silence, slice_samps);
-      write_circular_buffer(playbuf, silence, slice_samps);
+      write_circular_buffer(echo_buf, silence, slice_samps);
       dump_audio(silence, fd_farend, slice_samps);
     }
     usleep(time_slice * 1000);
@@ -185,6 +238,9 @@ void runUnderrunCompensation()
 void stop()
 {
   on = 0;
+  free_circular_buffer(farend_buf);
+  free_circular_buffer(echo_buf);
+  free_circular_buffer(nearend_buf);
   fclose(fd_farend);
   fclose(fd_send);
   fclose(fd_nearend);
@@ -194,54 +250,43 @@ void stop()
 
 int pull(JNIEnv *env, jshortArray buf)
 {
-  if (!recbuf)
+  if (!nearend_buf)
     return 0;
   jshort *_buf = env->GetShortArrayElements(buf, NULL);
   jsize samps = env->GetArrayLength(buf);
-  int n = read_circular_buffer(recbuf, _buf, samps);
+  int n = read_circular_buffer(nearend_buf, _buf, samps);
   env->ReleaseShortArrayElements(buf, _buf, 0);
   return n;
 }
 
-int push_helper(short *_farend)
+int push_helper(short *_farend, int samps)
 {
   // TODO thread-safe
-  if (!playbuf)
+  if (!echo_buf)
     return 0;
 
-  t_last_push = timestamp(t_start);
-  farend_duration += FRAME_MS;
+  farend_duration += samps * FRAME_MS / FRAME_SAMPS;
 
-  int rtn = FRAME_SAMPS;
+  int rtn = samps;
 
   // analyze
-  t_analyze.push(timestamp(t_start));
-  write_circular_buffer(playbuf, _farend, FRAME_SAMPS);
-  dump_audio(_farend, fd_farend, FRAME_SAMPS);
+  write_circular_buffer(echo_buf, _farend, samps);
+  dump_audio(_farend, fd_farend, samps);
 
   // render
-  t_render.push(timestamp(t_start) + BUFFER_SAMPS / FRAME_SAMPS * FRAME_MS);
-  if (android_AudioOut(p,_farend,FRAME_SAMPS) != FRAME_SAMPS)
-    rtn = 0; 
+  rtn = android_AudioOut(p,_farend,samps);
 
   return rtn;
 }
 
 int push(JNIEnv *env, jshortArray farend)
 {
-  if (!playbuf)
+  if (!echo_buf)
     return 0;
 
   jshort *_farend = env->GetShortArrayElements(farend, NULL);
   jsize samps = env->GetArrayLength(farend);
-  jshort *p = _farend;
-  int rtn = 0;
-  while(samps >= FRAME_SAMPS) {
-    push_helper(p);
-    p += FRAME_SAMPS;
-    samps -= FRAME_SAMPS;
-    rtn += FRAME_SAMPS;
-  }
+  int rtn = write_circular_buffer(farend_buf, _farend, samps);
   env->ReleaseShortArrayElements(farend, _farend, 0);
   return rtn;
 }

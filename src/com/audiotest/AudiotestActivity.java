@@ -78,31 +78,34 @@ public class AudiotestActivity extends Activity {
                     short[] buf = new short[FRAME_SAMPS];
                     byte[] bytes = new byte[FRAME_SAMPS * 2];
                     if (fis != null) {
-                        long t = System.currentTimeMillis();
-                        long t0 = t;
+                        long t0 = System.currentTimeMillis();
                         int loopIdx = 0;
                         while (thread != null && fis.read(bytes) > 0) {
+                            ++loopIdx;
                             ByteBuffer.wrap(bytes)
                                     .order(ByteOrder.LITTLE_ENDIAN)
                                     .asShortBuffer().get(buf);
 
                             if (opensl_example.push(buf) != FRAME_SAMPS)
                                 Log.d(TAG, "push failed");
-                            long t2 = System.currentTimeMillis();
-                            Log.d(TAG, "push elapse " + (t2 - t));
-                            t = t2;
 
-                            // 理想情况下应该暂停 FRAME_MS，这里为了模拟网络延迟和阻塞造成的丢包，随机调整暂停时间
-                            if (false) {
-                                Thread.sleep((int)(FRAME_MS * (1.8 - Math.random())));
-                            } else {
-                                if (++loopIdx % 22 == 0) {
-                                    Thread.sleep(FRAME_MS * 22);
-                                }
+                            // 如果写得太快，需要暂停一会，否则会覆盖底层的缓冲区
+                            long ahead = (loopIdx * FRAME_MS) - (System.currentTimeMillis() - t0);
+                            if (ahead > 200) {
+                                sleep(ahead - 200);
+                            }
+
+                            // 模拟网络阻塞或Java GC造成的随机延迟
+                            if (loopIdx % 32 == 0) {
+                                Thread.sleep(FRAME_MS * 32);
                             }
                         }
-                        Log.d(TAG, "audio timestamp by opensl " + opensl_example.getTimestamp());
-                        Log.d(TAG, "audio timestamp by java " + (System.currentTimeMillis() - t0));
+
+                        ++loopIdx;
+                        long ahead = (loopIdx * FRAME_MS) - (System.currentTimeMillis() - t0);
+                        if (ahead > 0) {
+                            sleep(ahead);
+                        }
                     }
                     fis.close();
 
@@ -156,7 +159,7 @@ public class AudiotestActivity extends Activity {
 		thread.start();
         thread2.start();
         //thread3.start();
-        thread4.start();
+        //thread4.start();
 
 
         checkAudioLowLatencyFeature();
