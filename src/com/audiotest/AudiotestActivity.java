@@ -85,13 +85,22 @@ public class AudiotestActivity extends Activity {
                                     .order(ByteOrder.LITTLE_ENDIAN)
                                     .asShortBuffer().get(buf);
 
-                            if (opensl_example.push(buf) != FRAME_SAMPS)
-                                Log.d(TAG, "push failed");
+                            // 有两种方式控制 push 的节奏：
+                            // A) 控制真实流逝时间和音频流时间的差距
+                            // B) 检测到队列满了，就 sleep
+                            if (false) {
+                                if (opensl_example.push(buf) != FRAME_SAMPS)
+                                    Log.d(TAG, "push failed");
 
-                            // 如果写得太快，需要暂停一会，否则会覆盖底层的缓冲区
-                            long ahead = (loopIdx * FRAME_MS) - (System.currentTimeMillis() - t0);
-                            if (ahead > 200) {
-                                sleep(ahead - 200);
+                                // 如果写得太快，需要暂停一会，否则会覆盖底层的缓冲区
+                                long ahead = (loopIdx * FRAME_MS) - (System.currentTimeMillis() - t0);
+                                if (ahead > 200) {
+                                    sleep(ahead - 200);
+                                }
+                            } else {
+                                while (opensl_example.push(buf) != FRAME_SAMPS) {
+                                    sleep(FRAME_MS);
+                                }
                             }
 
                             // 模拟网络阻塞或Java GC造成的随机延迟
