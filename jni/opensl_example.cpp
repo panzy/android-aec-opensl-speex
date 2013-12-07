@@ -53,6 +53,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
 // 供稳定的音频流。
+// 这个缓冲区对 echo delay 不会产生影响。
 #define FAREND_BUFFER_SAMPS (FRAME_SAMPS * 150)
 #define FAREND_BUFFER_SAMPS_DELAY (FRAME_SAMPS * 70)
 
@@ -142,7 +143,7 @@ void runNearendProcessing()
   // delay between play and rec in frames
   int delay = // (FAREND_BUFFER_SAMPS_DELAY / FRAME_SAMPS) // farend buffer 引入的播放延迟
     + 3 * (OPENSL_BUFFER_SAMPS / FRAME_SAMPS) // opensl rec buffer 引入的录音延迟
-    + 12 // 硬件延迟
+    + 10 // 硬件延迟
     ;
   if (delay >= ECHO_BUFFER_SAMPS / FRAME_SAMPS) {
     __android_log_print(ANDROID_LOG_ERROR, TAG, "echo buffer is insufficiency, actual delay %d frames", delay);
@@ -214,25 +215,6 @@ void runNearendProcessing()
   }
 
   android_CloseAudioDevice(p);
-}
-
-void runUnderrunCompensation()
-{
-  int time_slice = FRAME_MS;
-  int slice_samps = FRAME_SAMPS;
-  while (on) {
-    int64_t elapsed = timestamp(t_start);
-    int64_t delta = elapsed - farend_duration;
-    if (delta > FRAME_MS) {
-      __android_log_print(ANDROID_LOG_WARN, TAG, "playback underrun, time elapsed: %" PRId64 "ms, audio duration: %dms, gap %" PRId64 "ms", 
-          elapsed, farend_duration, delta);
-      farend_duration += time_slice;
-      android_AudioOut(p, silence, slice_samps);
-      write_circular_buffer(echo_buf, silence, slice_samps);
-      dump_audio(silence, fd_farend, slice_samps);
-    }
-    usleep(time_slice * 1000);
-  }
 }
 
 void stop()

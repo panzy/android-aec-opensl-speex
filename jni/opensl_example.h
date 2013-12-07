@@ -38,9 +38,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 void start();
 /* 持续处理录音。*/
 void runNearendProcessing();
-/* 持续对远端信号的延迟和丢包进行补充（用等量时间的静音代替），以确保回声消除的
- * 参考信号与近端信号在时间上同步。*/
-void runUnderrunCompensation();
 /* 结束播放和录音。*/
 void stop();
 /* 添加一段声音到播放队列。

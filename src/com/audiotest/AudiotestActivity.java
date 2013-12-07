@@ -58,7 +58,6 @@ public class AudiotestActivity extends Activity {
 	Thread thread;
     Thread thread2;
     Thread thread3;
-    Thread thread4;
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -149,18 +148,10 @@ public class AudiotestActivity extends Activity {
             }
         };
 
-        thread4 = new Thread() {
-            public void run() {
-                opensl_example.runUnderrunCompensation();
-            }
-        };
-
         opensl_example.start();
 		thread.start();
         thread2.start();
         //thread3.start();
-        //thread4.start();
-
 
         checkAudioLowLatencyFeature();
 
