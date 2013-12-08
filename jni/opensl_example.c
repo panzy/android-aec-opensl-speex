@@ -38,8 +38,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "webrtc/modules/audio_processing/ns/ns_core.h"
 #include "webrtc/modules/audio_processing/ns/include/noise_suppression_x.h"
 
-#define VECSAMPS_MONO 80 // frame size in samples
-#define BUFFERFRAMES (VECSAMPS_MONO * 50) // queue size in samples
+#define FRAME_SAMPS 80 // frame size in samples
+#define BUFFERFRAMES (FRAME_SAMPS * 50) // queue size in samples
 #define SR 8000 // sample rate
 
 typedef long long int64;
@@ -71,11 +71,11 @@ int64 timestamp(int64 base)
 
 void dump_audio(short *frame, FILE *fd)
 {
-  static float buf[VECSAMPS_MONO];
-  for (int i = 0; i < VECSAMPS_MONO; ++i) {
+  static float buf[FRAME_SAMPS];
+  for (int i = 0; i < FRAME_SAMPS; ++i) {
     buf[i] = frame[i] / 32768.0;
   }
-  fwrite(buf, VECSAMPS_MONO, 4, fd);
+  fwrite(buf, FRAME_SAMPS, 4, fd);
 }
 
 void init()
@@ -101,14 +101,14 @@ void init()
 void run() 
 {
   int samps, i, j;
-  short inbuffer[VECSAMPS_MONO]; // record
-  short processedbuffer[VECSAMPS_MONO];
-  short processedbuffer2[VECSAMPS_MONO];
+  short inbuffer[FRAME_SAMPS]; // record
+  short processedbuffer[FRAME_SAMPS];
+  short processedbuffer2[FRAME_SAMPS];
 
   while(on) {
 
-    samps = android_AudioIn(p,inbuffer,VECSAMPS_MONO);
-    int64 t_capture = timestamp(t_start) - (BUFFERFRAMES / VECSAMPS_MONO * 10);
+    samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
+    int64 t_capture = timestamp(t_start) - (BUFFERFRAMES / FRAME_SAMPS * 10);
 
     WebRtcNsx_Process(ns_inst, inbuffer, NULL, processedbuffer, NULL);
 
@@ -122,10 +122,10 @@ void run()
       int64 t_process = timestamp(t_start);
       int delay = (t_render.front() - t_analyze.front()) + (t_process - t_capture);
       WebRtcAecm_Process(
-          aecm, inbuffer, processedbuffer, processedbuffer2, VECSAMPS_MONO, delay);
+          aecm, inbuffer, processedbuffer, processedbuffer2, FRAME_SAMPS, delay);
       __android_log_print(ANDROID_LOG_DEBUG, "webrtc", "aecm process, delay=%d = (%lld - %lld) + (%lld - %lld)",
           delay, t_render.front(), t_analyze.front(), t_process, t_capture);
-      //write_circular_buffer(recbuf, processedbuffer, VECSAMPS_MONO);
+      //write_circular_buffer(recbuf, processedbuffer, FRAME_SAMPS);
       dump_audio(processedbuffer2, fd_send);
       t_render.pop();
       t_analyze.pop();
@@ -133,7 +133,7 @@ void run()
     else
     {
       //__android_log_print(ANDROID_LOG_DEBUG, "webrtc", "aecm process skipped");
-      //write_circular_buffer(recbuf, processedbuffer, VECSAMPS_MONO);
+      //write_circular_buffer(recbuf, processedbuffer, FRAME_SAMPS);
       dump_audio(processedbuffer, fd_send);
     }
   }  
@@ -157,27 +157,24 @@ int pull(JNIEnv *env, jshortArray buf)
   if (!recbuf)
     return 0;
   jshort *_buf = env->GetShortArrayElements(buf, NULL);
-  int n = read_circular_buffer(recbuf, _buf, VECSAMPS_MONO);
+  int n = read_circular_buffer(recbuf, _buf, FRAME_SAMPS);
   env->ReleaseShortArrayElements(buf, _buf, 0);
   return n;
 }
 
 int push(JNIEnv *env, jshortArray farend)
 {
-  if (!playbuf)
-    return 0;
-
   jshort *_farend = env->GetShortArrayElements(farend, NULL);
   jsize samps = env->GetArrayLength(farend);
   int rtn = samps;
 
   // analyze
   t_analyze.push(timestamp(t_start));
-  WebRtcAecm_BufferFarend(aecm, _farend, VECSAMPS_MONO);
+  WebRtcAecm_BufferFarend(aecm, _farend, FRAME_SAMPS);
   dump_audio(_farend, fd_farend);
 
   // render
-  t_render.push(timestamp(t_start) + BUFFERFRAMES / VECSAMPS_MONO * 10);
+  t_render.push(timestamp(t_start) + BUFFERFRAMES / FRAME_SAMPS * 10);
   if (android_AudioOut(p,_farend,samps) != samps)
     rtn = 0; 
 
