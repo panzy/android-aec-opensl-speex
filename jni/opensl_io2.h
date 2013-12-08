@@ -89,8 +89,11 @@ typedef struct opensl_stream {
   /*
   Open the audio device with a given sampling rate (sr), input and output channels and IO buffer size
   in frames. Returns a handle to the OpenSL stream
+
+  @param queuesize: buffer count in queue
   */
-  OPENSL_STREAM* android_OpenAudioDevice(int sr, int inchannels, int outchannels, int bufferframes);
+  OPENSL_STREAM* android_OpenAudioDevice(int sr, int inchannels, int outchannels,
+      int bufferframes, int queuesize);
   /* 
   Close the audio device 
   */
