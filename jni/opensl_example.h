@@ -35,7 +35,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *  Byte order = Little-endian
  *  Channels = 1
  * */
-void start();
+void start(jint audio_track_min_buf_size, jint audio_record_min_buf_size);
 /* 持续处理录音。*/
 void runNearendProcessing();
 /* 结束播放和录音。*/

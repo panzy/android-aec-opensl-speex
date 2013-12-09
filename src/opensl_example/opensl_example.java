@@ -9,8 +9,8 @@
 package opensl_example;
 
 public class opensl_example {
-  public static void start() {
-    opensl_exampleJNI.start();
+  public static void start(int audio_track_min_buf, int audio_record_min_buf) {
+    opensl_exampleJNI.start(audio_track_min_buf, audio_record_min_buf);
   }
 
   public static void runNearendProcessing() {

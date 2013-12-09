@@ -21,7 +21,7 @@ public class opensl_exampleJNI {
     }
   }
 
-  public final static native void start();
+  public final static native void start(int jarg1, int jarg2);
   public final static native void runNearendProcessing();
   public final static native void stop();
   public final static native int push(short[] jarg2);

@@ -1,30 +1,4 @@
 /*
-opensl_example.c:
-OpenSL example module 
-Copyright (c) 2012, Victor Lazzarini
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the <organization> nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include <jni.h>
@@ -36,6 +10,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <inttypes.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
+#include <math.h>
 #include <unistd.h>
 #include "opensl_io2.h"
 
@@ -58,14 +33,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // 这个缓冲区对 echo delay 不会产生影响。
 #define FAREND_BUFFER_SAMPS (FRAME_SAMPS * 150)
 #define FAREND_BUFFER_SAMPS_DELAY (FRAME_SAMPS * 70)
-
-// 提交给 OpenSL player buffer queue 的 buffer 的长度，
-// 这个缓冲区长度对 echo delay 有直接影响，二者似乎是粗略的线性关系。
-#define OPENSL_BUFFER_SAMPS (FRAME_SAMPS * 1)
-#define OPENSL_QUEUE_SIZE 20
-
-// 回声信号缓冲区，其长度要能容纳这个延迟：声音从被播放到被录音。
-#define ECHO_BUFFER_SAMPS (FRAME_SAMPS * 50)
 
 // 处理后的近端信号。
 #define NEAREND_BUFFER_SAMPS (FRAME_SAMPS * 10)
@@ -107,6 +74,8 @@ FILE *fd_send = NULL;
 
 short silence[FRAME_SAMPS];
 
+int echo_delay = 0;
+
 //----------------------------------------------------------------------
 
 // get timestamp of today in ms.
@@ -124,15 +93,32 @@ void dump_audio_(short *frame, FILE *fd, int samps)
   }
 }
 
-void start()
+void start(jint track_min_buf_size, jint record_min_buf_size)
 {
+  // 经过测试，track_min_buf_size = 870, record_min_buf_size = 4096 时，回声延时
+  // 大约为 22x20=440ms，而延时是与 out_bufferframes 成正比的（参见
+  // AudioTrack::getMinFrameCount 的实现）
+  echo_delay = 23 * track_min_buf_size / 870;
+
+  const int sample_size = sizeof(short);
+  int in_buffer_cnt = ceil((float)record_min_buf_size / sample_size / FRAME_SAMPS);
+  int out_buffer_cnt = ceil((float)track_min_buf_size / sample_size / FRAME_SAMPS);
+
+  if (in_buffer_cnt < 20) in_buffer_cnt = 20;
+  if (out_buffer_cnt < 20) out_buffer_cnt = 20;
+
+  __android_log_print(ANDROID_LOG_DEBUG, TAG,
+          "OpenSL audio in-buffer frames %dx%d, out-buffer frames %dx%d, echo delay %d(x%d=%d)ms",
+          FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt,
+          echo_delay, FRAME_MS, echo_delay * FRAME_MS);
+
+  p = android_OpenAudioDevice(SR, 1, 1, FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt);
+  if(p == NULL) return; 
+
   farend_buf = create_circular_buffer(FAREND_BUFFER_SAMPS);
   nearend_buf = create_circular_buffer(NEAREND_BUFFER_SAMPS);
-  echo_buf = create_circular_buffer(ECHO_BUFFER_SAMPS);
+  echo_buf = create_circular_buffer((echo_delay + 4) * FRAME_SAMPS);
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
-  p = android_OpenAudioDevice(SR, 1, 1, OPENSL_BUFFER_SAMPS, OPENSL_QUEUE_SIZE);
-
-  if(p == NULL) return; 
 
   on = 1;
 #if DUMP_PCM
@@ -158,25 +144,6 @@ void runNearendProcessing()
   short processedbuffer[FRAME_SAMPS];
 
   int playback_delay = FAREND_BUFFER_SAMPS_DELAY / FRAME_SAMPS;
-
-  // delay between play and rec in frames
-  int echo_delay = (FAREND_BUFFER_SAMPS_DELAY / FRAME_SAMPS) // farend buffer 引入的播放延迟
-    + (OPENSL_BUFFER_SAMPS / FRAME_SAMPS) // opensl rec buffer 引入的录音延迟
-    + 20 // 硬件延迟
-    ;
-  echo_delay = 23; // huawei 
-  echo_delay = 39; // xoom 
-
-  __android_log_print(ANDROID_LOG_INFO, TAG, "playback delay is %d frames / %dms",
-      playback_delay, playback_delay * FRAME_MS);
-
-  if (echo_delay >= ECHO_BUFFER_SAMPS / FRAME_SAMPS) {
-    __android_log_print(ANDROID_LOG_ERROR, TAG, "echo delay is %d frames / %dms"
-        ", echo buffer is insufficiency", echo_delay, echo_delay * FRAME_MS);
-  } else {
-    __android_log_print(ANDROID_LOG_INFO, TAG, "echo delay is %d frames / %dms",
-        echo_delay, echo_delay * FRAME_MS);
-  }
 
   //
   // 每次循环处理一个 FRAME

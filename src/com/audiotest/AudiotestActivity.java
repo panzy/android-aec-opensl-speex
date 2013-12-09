@@ -32,7 +32,10 @@ package com.audiotest;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioRecord;
+import android.media.AudioTrack;
 import android.os.Build;
 import android.util.Log;
 import opensl_example.opensl_example;
@@ -62,6 +65,11 @@ public class AudiotestActivity extends Activity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
+
+        int track_minbufsz = AudioTrack.getMinBufferSize(8000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        Log.d(TAG, "AudioTrack.getMinBufferSize " + track_minbufsz);
+        int record_minbufsz = AudioRecord.getMinBufferSize(8000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        Log.d(TAG, "AudioRecord.getMinBufferSize " + record_minbufsz);
 
         thread = new Thread() {
             public void run() {
@@ -157,7 +165,7 @@ public class AudiotestActivity extends Activity {
             }
         };
 
-        opensl_example.start();
+        opensl_example.start(track_minbufsz, record_minbufsz);
 		thread.start();
         thread2.start();
         //thread3.start();

@@ -325,7 +325,8 @@ static void openSLDestroyEngine(OPENSL_STREAM *p){
 
 // open the android audio device for input and/or output
 OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
-        int bufferframes, int queuesize){
+        int in_buffer_frames, int in_buffer_cnt,
+        int out_buffer_frames, int out_buffer_cnt){
   
   OPENSL_STREAM *p;
   p = (OPENSL_STREAM *) malloc(sizeof(OPENSL_STREAM));
@@ -334,25 +335,25 @@ OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
   p->outchannels = outchannels;
   p->sr = sr;
  
-  if((p->outBufSamples  =  bufferframes*outchannels) != 0) {
+  if((p->outBufSamples  =  out_buffer_frames*outchannels) != 0) {
     if((p->outputBuffer = (short *) calloc(p->outBufSamples, sizeof(short))) == NULL) {
       android_CloseAudioDevice(p);
       return NULL;
     }
   }
 
-  if((p->inBufSamples  =  bufferframes*inchannels) != 0){
+  if((p->inBufSamples  =  in_buffer_frames*inchannels) != 0){
     if((p->inputBuffer = (short *) calloc(p->inBufSamples, sizeof(short))) == NULL){
       android_CloseAudioDevice(p);
       return NULL; 
     }
   }
 
-  if((p->outrb = create_circular_buffer(p->outBufSamples*queuesize)) == NULL) {
+  if((p->outrb = create_circular_buffer(p->outBufSamples*out_buffer_cnt)) == NULL) {
       android_CloseAudioDevice(p);
       return NULL; 
   }
- if((p->inrb = create_circular_buffer(p->outBufSamples*queuesize)) == NULL) {
+ if((p->inrb = create_circular_buffer(p->inBufSamples*out_buffer_cnt)) == NULL) {
       android_CloseAudioDevice(p);
       return NULL; 
   }
