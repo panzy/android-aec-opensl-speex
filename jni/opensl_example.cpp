@@ -137,7 +137,7 @@ void start()
   on = 1;
 #if DUMP_PCM
   int r = mkdir("/mnt/sdcard/tmp", 755);
-  if (r == 0 || r == EEXIST) {
+  if (r == 0 || errno == EEXIST) {
     fd_farend = fopen("/mnt/sdcard/tmp/far.dat", "w+");
     fd_nearend = fopen("/mnt/sdcard/tmp/near.dat", "w+");
     fd_echo = fopen("/mnt/sdcard/tmp/echo.dat", "w+");
@@ -164,8 +164,8 @@ void runNearendProcessing()
     + (OPENSL_BUFFER_SAMPS / FRAME_SAMPS) // opensl rec buffer 引入的录音延迟
     + 20 // 硬件延迟
     ;
+  echo_delay = 23; // huawei 
   echo_delay = 39; // xoom 
-  echo_delay = 25; // huawei 
 
   __android_log_print(ANDROID_LOG_INFO, TAG, "playback delay is %d frames / %dms",
       playback_delay, playback_delay * FRAME_MS);
