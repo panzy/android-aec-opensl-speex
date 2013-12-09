@@ -95,8 +95,11 @@ void dump_audio_(short *frame, FILE *fd, int samps)
 
 void start(jint track_min_buf_size, jint record_min_buf_size)
 {
-  // 经过测试，track_min_buf_size = 870, record_min_buf_size = 4096 时，回声延时
-  // 大约为 22x20=440ms，而延时是与 out_bufferframes 成正比的（参见
+  // 经过测试，在满足以下条件的设备上——
+  // 1, track_min_buf_size = 870
+  // 2, record_min_buf_size = 4096
+  // 3, OpenSL buffer samples = 160
+  // ——，回声延时大约为 23x20=460ms(+-40)，而延时是与 out_bufferframes 成正比的（参见
   // AudioTrack::getMinFrameCount 的实现）
   echo_delay = 23 * track_min_buf_size / 870;
 
