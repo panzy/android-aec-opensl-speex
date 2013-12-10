@@ -308,7 +308,7 @@ int playback(short *_farend, int samps, bool with_aec_analyze)
 
 int push(JNIEnv *env, jshortArray farend)
 {
-  if (!echo_buf)
+  if (!farend_buf)
     return 0;
 
   jshort *_farend = env->GetShortArrayElements(farend, NULL);
