@@ -75,6 +75,8 @@ FILE *fd_send = NULL;
 short silence[FRAME_SAMPS];
 
 int echo_delay = 0;
+int in_buffer_cnt = 0;
+int out_buffer_cnt = 0;
 
 //----------------------------------------------------------------------
 
@@ -99,19 +101,31 @@ void start(jint track_min_buf_size, jint record_min_buf_size)
   // 1, track_min_buf_size = 870
   // 2, record_min_buf_size = 4096
   // 3, OpenSL buffer samples = 160
-  // ——，回声延时大约为 23x20=460ms(+-40)，而延时是与 out_bufferframes 成正比的（参见
+  // 4, 主循环的 ahead 范围为 (20,60)ms ［TODO why would this matter ???]
+  // 5, [ in_buffer_cnt 和 out_buffer_cnt 对延迟没有影响 ]
+  // ——，回声延时大约为 20x20=400ms(+-40)，而延时是与 out_bufferframes 成正比的（参见
   // AudioTrack::getMinFrameCount 的实现）
-  echo_delay = 23 * track_min_buf_size / 870;
+  echo_delay = 20 * track_min_buf_size / 870;
+  // 延迟修正不足没关系，因为 speex AEC 模块有个 filter length 参数，初始化为
+  // 8xframe，但是修正过度就很严重，将完全不能消除回声。
+  echo_delay -= 2;
 
   const int sample_size = sizeof(short);
-  int in_buffer_cnt = ceil((float)record_min_buf_size / sample_size / FRAME_SAMPS);
-  int out_buffer_cnt = ceil((float)track_min_buf_size / sample_size / FRAME_SAMPS);
+  in_buffer_cnt = ceil((float)record_min_buf_size / sample_size / FRAME_SAMPS);
+  out_buffer_cnt = ceil((float)track_min_buf_size / sample_size / FRAME_SAMPS);
 
-  if (in_buffer_cnt < 20) in_buffer_cnt = 20;
-  if (out_buffer_cnt < 20) out_buffer_cnt = 20;
+  // 太小的 out_buffer_cnt （比如3） 不足以保证流畅的播放。
+  const int min_buffer_cnt = 10;
+  if (out_buffer_cnt < min_buffer_cnt) out_buffer_cnt = min_buffer_cnt;
+  // 尚未观测到 in_buffer_cnt 太小的直接影响，不过为了简化主循环中控制 ahead 时
+  // 间的逻辑，这里也强制 in_buffer_cnt 不小于一个阈值。
+  if (in_buffer_cnt < min_buffer_cnt) in_buffer_cnt = min_buffer_cnt;
 
   __android_log_print(ANDROID_LOG_DEBUG, TAG,
-          "OpenSL audio in-buffer frames %dx%d, out-buffer frames %dx%d, echo delay %d(x%d=%d)ms",
+          "AudioRecord min buf size %dB, AudioTrack min buf size %dB",
+          record_min_buf_size, track_min_buf_size);
+  __android_log_print(ANDROID_LOG_DEBUG, TAG,
+          "OpenSL audio in-buffer samps %dx%d, out-buffer samps %dx%d, echo delay %d(x%d=%dms)",
           FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt,
           echo_delay, FRAME_MS, echo_delay * FRAME_MS);
 
@@ -137,7 +151,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size)
 #endif
   t_start = timestamp(0);
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
-  __android_log_print(ANDROID_LOG_DEBUG, TAG, "start, %" PRId64 , t_start); 
+  __android_log_print(ANDROID_LOG_DEBUG, TAG, "start, %" PRId64 " ms" , t_start); 
 }
 
 void runNearendProcessing() 
@@ -154,8 +168,26 @@ void runNearendProcessing()
   int loop_idx = 0;
   int64_t t0 = timestamp(0), t1 = 0; // loop body begins
   int64_t total_ahead = 0; // 累计剩余时间
-  int max_ahead = NEAREND_BUFFER_SAMPS / FRAME_SAMPS * FRAME_MS;
-  int min_ahead = max_ahead / 2;
+  //
+  // 我们并不试图让每一次循环的持续时间精确为 FRAME_MS，因为这不可能做到：尽管绝
+  // 大多数情况下我们只需要比如说3ms就处理完了一个frame，但是偶尔（进程调度？）
+  // 也会需要明显超过 FRAME_MS 的毫秒数。
+  // 所以我们能做的是在一个更大的时间跨度上让实际流逝时间与音频时间大体上保持一致
+  // ，这个偏差要在相关缓冲区的承受范围之内，具体来说：
+  // A. 循环不能太快，否则从 OpenSL OPENSL_STREAM->outrb 可能读不到数据，以及
+  // nearend_buf 中的未读数据会被覆盖；
+  // B. 但也不能太慢，否则OpenSL OPENSL_STREAM->inrb 中的未读数据会被覆盖。
+  //
+  // 把时间提前量定义为
+  //    ahead = 物理时长 - 已处理的音频的时长
+  int max_ahead = out_buffer_cnt / 2 * FRAME_MS;
+  int min_ahead = std::max(max_ahead / 2, 1);
+  // ……不管怎样，下面的硬编码的值的实际效果更好
+  max_ahead = 3 * FRAME_MS;
+  min_ahead = 1 * FRAME_MS;
+  __android_log_print(ANDROID_LOG_DEBUG, TAG,
+      "main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
+      min_ahead, max_ahead, min_ahead / FRAME_MS, max_ahead / FRAME_MS);
   while(on) {
     t1 = timestamp(0);
     ++loop_idx;
