@@ -31,11 +31,18 @@
 // 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
 // 供稳定的音频流。
 // 这个缓冲区对 echo delay 不会产生影响。
-#define FAREND_BUFFER_SAMPS (FRAME_SAMPS * 150)
-#define FAREND_BUFFER_SAMPS_DELAY (FRAME_SAMPS * 70)
+#define FAREND_BUFFER_SAMPS (FRAME_SAMPS * 100)
+// 如果等到完全填满 FAREND_BUFFER 才开始播放（在这之前只播放静音），这个播放延迟
+// 就长到无法忍受了，所以我们在播放 farend 之前只缓存 FAREND_BUFFER_SAMPS_PART
+// 那么多。
+// 这么做的副作用是，如果上层在填充 FAREND_BUFFER_SAMPS_PART 与
+// FAREND_BUFFER_SAMPS 之间的数据时发生了严重的阻塞，播放的声音会有卡顿现象。不
+// 过这仍然不会影响 AEC，因为 AEC 主线程遇到 FAREND_BUFFER underrun 会自动补充静
+// 音帧，AEC 模块无需区分输入给它的 farend 是原样的还是经过underrun修正的。
+#define FAREND_BUFFER_SAMPS_PART (FRAME_SAMPS * 10)
 
 // 处理后的近端信号。
-#define NEAREND_BUFFER_SAMPS (FRAME_SAMPS * 10)
+#define NEAREND_BUFFER_SAMPS (FRAME_SAMPS * 20)
 
 #define TAG "aec" // log tag
 
@@ -160,7 +167,7 @@ void runNearendProcessing()
   short refbuf[FRAME_SAMPS];
   short processedbuffer[FRAME_SAMPS];
 
-  int playback_delay = FAREND_BUFFER_SAMPS_DELAY / FRAME_SAMPS;
+  int playback_delay = FAREND_BUFFER_SAMPS_PART / FRAME_SAMPS;
 
   //
   // 每次循环处理一个 FRAME
