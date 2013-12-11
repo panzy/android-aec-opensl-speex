@@ -430,10 +430,9 @@ void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 // gets a buffer of size samples from the device
 int android_AudioIn(OPENSL_STREAM *p,short *buffer,int size){
   short *inBuffer;
-  int i, count = size;
+  int i;
   if(p == NULL ||  p->inBufSamples ==  0) return 0;
-  count = read_circular_buffer(p->inrb,p->inputBuffer,count);
-  size = count;
+  size = read_circular_buffer(p->inrb,p->inputBuffer,size);
   for(i=0; i < size; i++){
     buffer[i] =  p->inputBuffer[i];
   }

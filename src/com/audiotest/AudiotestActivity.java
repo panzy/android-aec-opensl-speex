@@ -54,6 +54,7 @@ public class AudiotestActivity extends Activity {
     private static final int SR = 8000; // sample rate
     private static final int FRAME_SAMPS = 320; // samples per frame
     private static final int FRAME_MS = 1000 * FRAME_SAMPS / SR; // ms
+    private static final int playback_delay = 200; // ms
 
     /** Called when the activity is first created. */
 	Thread thread;
@@ -125,7 +126,7 @@ public class AudiotestActivity extends Activity {
                     fis.close();
 
                     // exit app
-                    sleep(3000);
+                    sleep(playback_delay);
                     AudiotestActivity.this.runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -164,7 +165,7 @@ public class AudiotestActivity extends Activity {
             }
         };
 
-        opensl_example.start(track_minbufsz, record_minbufsz);
+        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay);
 		thread.start();
         thread2.start();
         //thread3.start();

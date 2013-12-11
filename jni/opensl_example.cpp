@@ -4,7 +4,6 @@
 #include <jni.h>
 #include <android/log.h>
 #include <sys/time.h>
-#include <assert.h>
 #include <queue>
 #include <stdio.h>
 #include <inttypes.h>
@@ -32,14 +31,6 @@
 // 供稳定的音频流。
 // 这个缓冲区对 echo delay 不会产生影响。
 #define FAREND_BUFFER_SAMPS (FRAME_SAMPS * 100)
-// 如果等到完全填满 FAREND_BUFFER 才开始播放（在这之前只播放静音），这个播放延迟
-// 就长到无法忍受了，所以我们在播放 farend 之前只缓存 FAREND_BUFFER_SAMPS_PART
-// 那么多。
-// 这么做的副作用是，如果上层在填充 FAREND_BUFFER_SAMPS_PART 与
-// FAREND_BUFFER_SAMPS 之间的数据时发生了严重的阻塞，播放的声音会有卡顿现象。不
-// 过这仍然不会影响 AEC，因为 AEC 主线程遇到 FAREND_BUFFER underrun 会自动补充静
-// 音帧，AEC 模块无需区分输入给它的 farend 是原样的还是经过underrun修正的。
-#define FAREND_BUFFER_SAMPS_PART (FRAME_SAMPS * 10)
 
 // 处理后的近端信号。
 #define NEAREND_BUFFER_SAMPS (FRAME_SAMPS * 20)
@@ -55,6 +46,7 @@
 
 //--------------------------------------------------------------------------------
 
+void dump_audio_(short *frame, FILE *fd, int samps);
 void speex_ec_open (int sampleRate, int bufsize, int totalSize);
 void speex_ec_close ();
 int playback(short *_farend, int samps, bool with_aec_analyze);
@@ -81,11 +73,38 @@ FILE *fd_send = NULL;
 
 short silence[FRAME_SAMPS];
 
-int echo_delay = 0;
+int playback_delay = 0; // samps
+int echo_delay = 0; // samps, relative to playback
 int in_buffer_cnt = 0;
 int out_buffer_cnt = 0;
 
 //----------------------------------------------------------------------
+
+void align_farend_buf(int n) {
+  while (n > 0) {
+    if (n <= FRAME_SAMPS) {
+      playback(silence, n, true);
+      n = 0;
+    } else {
+      playback(silence, FRAME_SAMPS, true);
+      n -= FRAME_SAMPS;
+    }
+  }
+}
+
+void align_nearend_buf(int n) {
+  while (n > 0) {
+    if (n <= FRAME_SAMPS) {
+      write_circular_buffer(nearend_buf, silence, n);
+      dump_audio(silence, fd_nearend, n);
+      n = 0;
+    } else {
+      write_circular_buffer(nearend_buf, silence, FRAME_SAMPS);
+      dump_audio(silence, fd_nearend, FRAME_SAMPS);
+      n -= FRAME_SAMPS;
+    }
+  }
+}
 
 // get timestamp of today in ms.
 int64_t timestamp(int64_t base)
@@ -102,8 +121,10 @@ void dump_audio_(short *frame, FILE *fd, int samps)
   }
 }
 
-void start(jint track_min_buf_size, jint record_min_buf_size)
+void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_delay_ms)
 {
+  playback_delay = playback_delay_ms / FRAME_MS;
+
   // 经过测试，在满足以下条件的设备上——
   // 1, track_min_buf_size = 870
   // 2, record_min_buf_size = 4096
@@ -158,7 +179,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size)
 #endif
   t_start = timestamp(0);
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
-  __android_log_print(ANDROID_LOG_DEBUG, TAG, "start, %" PRId64 " ms" , t_start); 
+  __android_log_print(ANDROID_LOG_DEBUG, TAG, "start at %" PRId64 "ms" , t_start); 
 }
 
 void runNearendProcessing() 
@@ -167,14 +188,14 @@ void runNearendProcessing()
   short refbuf[FRAME_SAMPS];
   short processedbuffer[FRAME_SAMPS];
 
-  int playback_delay = FAREND_BUFFER_SAMPS_PART / FRAME_SAMPS;
-
   //
   // 每次循环处理一个 FRAME
   //
   int loop_idx = 0;
   int64_t t0 = timestamp(0), t1 = 0; // loop body begins
   int64_t total_ahead = 0; // 累计剩余时间
+  int rendered_samps = 0;
+  int captured_samps = 0;
   //
   // 我们并不试图让每一次循环的持续时间精确为 FRAME_MS，因为这不可能做到：尽管绝
   // 大多数情况下我们只需要比如说3ms就处理完了一个frame，但是偶尔（进程调度？）
@@ -184,6 +205,8 @@ void runNearendProcessing()
   // A. 循环不能太快，否则从 OpenSL OPENSL_STREAM->outrb 可能读不到数据，以及
   // nearend_buf 中的未读数据会被覆盖；
   // B. 但也不能太慢，否则OpenSL OPENSL_STREAM->inrb 中的未读数据会被覆盖。
+  //
+  // XXX 另外，AudioSystem record buffer overflow 好像也跟这个有关。
   //
   // 把时间提前量定义为
   //    ahead = 物理时长 - 已处理的音频的时长
@@ -202,20 +225,30 @@ void runNearendProcessing()
     // playback
     if (loop_idx <= playback_delay) {
       playback(silence, FRAME_SAMPS, false);
+      rendered_samps += FRAME_SAMPS;
     } else {
       int samps = read_circular_buffer(farend_buf, inbuffer, FRAME_SAMPS);
       if (samps > 0) {
         playback(inbuffer, samps, true);
+        rendered_samps += samps;
       }
       // pad underrun with silence
-      if (FRAME_SAMPS - samps > 0) {
-        playback(silence, FRAME_SAMPS -samps, true);
+      // |playback_delay| 可以显著减少这种情况的发生
+      int lack_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - rendered_samps;
+      if (lack_samps > 0) {
+        __android_log_print(ANDROID_LOG_DEBUG, TAG, "playback underrun, lack of %d samps", lack_samps);
+        align_farend_buf(lack_samps);
+        rendered_samps += lack_samps;
       }
     }
 
     // record
     int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
     if (samps == FRAME_SAMPS) {
+      if (captured_samps == 0) 
+        __android_log_print(ANDROID_LOG_DEBUG, TAG, "first time of capture at @%"PRId64"ms", timestamp(t0));
+      captured_samps += samps;
+
       dump_audio(inbuffer, fd_nearend, samps);
       short *out; // output(send) frame
       if (loop_idx <= playback_delay + echo_delay) {
@@ -234,9 +267,7 @@ void runNearendProcessing()
       dump_audio(refbuf, fd_echo, samps);
       dump_audio(out, fd_send, samps);
     } else {
-      dump_audio(silence, fd_nearend, FRAME_SAMPS);
-      dump_audio(silence, fd_echo, FRAME_SAMPS);
-      dump_audio(silence, fd_send, FRAME_SAMPS);
+      __android_log_print(ANDROID_LOG_DEBUG, TAG, "record nothing at @%"PRId64"ms", timestamp(t0));
     }
 
     //
