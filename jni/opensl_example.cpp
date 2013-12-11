@@ -125,6 +125,21 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
 {
   playback_delay = playback_delay_ms / FRAME_MS;
 
+  //
+  // 估算回声延迟
+  //
+  // XXX 以下方法适用于 Huawei U8860 和 MOTO XOOM，但不适用于 Xiaomi 1S/2S。
+  //
+  // 观测数据
+  // ============================================================
+  // device       track(B)  record(B)   echo_delay(ms)
+  // ------------------------------------------------------------
+  // xiaomi 1s    870       640         340
+  // xiaomi 2s    1364      640         800
+  // hw u8860     870       4096        400
+  // xoom         1486      640         720
+  // ------------------------------------------------------------
+  //
   // 经过测试，在满足以下条件的设备上——
   // 1, track_min_buf_size = 870
   // 2, record_min_buf_size = 4096
