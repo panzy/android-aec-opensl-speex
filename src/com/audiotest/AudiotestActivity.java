@@ -32,6 +32,7 @@ package com.audiotest;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.content.res.AssetManager;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
@@ -42,10 +43,7 @@ import opensl_example.opensl_example;
 import android.app.Activity;
 import android.os.Bundle;
 
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
@@ -81,7 +79,8 @@ public class AudiotestActivity extends Activity {
         thread2 = new Thread() {
             public void run() {
                 try {
-                    FileInputStream fis = new FileInputStream("/mnt/sdcard/tmp/speaker.dat");
+                    //FileInputStream fis = new FileInputStream("/mnt/sdcard/tmp/speaker.dat");
+                    InputStream fis = AudiotestActivity.this.getAssets().open("speaker.dat");
                     short[] buf = new short[FRAME_SAMPS];
                     byte[] bytes = new byte[FRAME_SAMPS * 2];
                     if (fis != null) {
