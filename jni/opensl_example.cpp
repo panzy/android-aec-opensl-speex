@@ -16,16 +16,27 @@
 #include "speex/speex_echo.h"
 #include "speex/speex_preprocess.h"
 
+extern "C" {
+#include "webrtc/modules/audio_processing/utility/delay_estimator_wrapper.h"
+}
+
 #include "opensl_example.h"
 
 // from <inttypes.h>
 #define	PRId64			"lld"		/* int64_t */
 
 #define SR 8000 // sample rate
+#define SAMPLE_SIZE 2 // bytes per sample
 
 // AEC frame, 10ms
-#define FRAME_SAMPS 160
-#define FRAME_MS (1000 * FRAME_SAMPS / SR)
+#define FRAME_SAMPS 160 // samples per frame
+#define FRAME_MS (1000 * FRAME_SAMPS / SR) // frame duration in ms
+#define FRAME_RATE (1000 / FRAME_MS) // frames per second
+
+// WebRtc delay estimator params
+#define WEBRTC_SPECTRUM_SIZE (FRAME_SAMPS * 1)
+#define WEBRTC_SPECTRUM_MS (WEBRTC_SPECTRUM_SIZE * FRAME_MS / FRAME_SAMPS)
+#define WEBRTC_HISTORY_SIZE ((1500 / 1000) * SR * SAMPLE_SIZE)
 
 // 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
 // 供稳定的音频流。
@@ -46,15 +57,20 @@
 
 //--------------------------------------------------------------------------------
 
+void cleanup();
 void dump_audio_(short *frame, FILE *fd, int samps);
 void speex_ec_open (int sampleRate, int bufsize, int totalSize);
 void speex_ec_close ();
 int playback(short *_farend, int samps, bool with_aec_analyze);
+float *to_float(short *frame);
 
 //--------------------------------------------------------------------------------
 
 SpeexEchoState *st;
 SpeexPreprocessState *den;
+
+void *delayEstFar;
+void *delayEst;
 
 static int on;
 OPENSL_STREAM  *p = NULL;
@@ -75,6 +91,7 @@ short silence[FRAME_SAMPS];
 
 int playback_delay = 0; // samps
 int echo_delay = 0; // samps, relative to playback
+int echo_delay2 = -1; // samps, relative to playback, estimated by WebRtc 
 int in_buffer_cnt = 0;
 int out_buffer_cnt = 0;
 
@@ -121,6 +138,32 @@ void dump_audio_(short *frame, FILE *fd, int samps)
   }
 }
 
+void open_dump_files()
+{
+  int r = mkdir("/mnt/sdcard/tmp", 755);
+  if (r == 0 || errno == EEXIST) {
+    fd_farend = fopen("/mnt/sdcard/tmp/far.dat", "w+");
+    fd_nearend = fopen("/mnt/sdcard/tmp/near.dat", "w+");
+    fd_echo = fopen("/mnt/sdcard/tmp/echo.dat", "w+");
+    fd_send = fopen("/mnt/sdcard/tmp/send.dat", "w+");
+  } else {
+    fd_farend = fd_nearend = fd_echo = fd_send = NULL;
+  }
+}
+
+void close_dump_files()
+{
+  if (fd_farend)
+    fclose(fd_farend);
+  if (fd_nearend)
+    fclose(fd_nearend);
+  if (fd_echo)
+    fclose(fd_echo);
+  if (fd_send)
+    fclose(fd_send);
+  fd_farend = fd_send = fd_nearend = NULL;
+}
+
 void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_delay_ms)
 {
   playback_delay = playback_delay_ms / FRAME_MS;
@@ -138,6 +181,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
   // xiaomi 2s    1364      640         800
   // hw u8860     870       4096        400
   // xoom         1486      640         720
+  // htc          1486      8192        900
   // ------------------------------------------------------------
   //
   // 经过测试，在满足以下条件的设备上——
@@ -178,20 +222,30 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
   farend_buf = create_circular_buffer(FAREND_BUFFER_SAMPS);
   nearend_buf = create_circular_buffer(NEAREND_BUFFER_SAMPS);
   echo_buf = create_circular_buffer((echo_delay + 4) * FRAME_SAMPS);
+
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
 
-  on = 1;
-#if DUMP_PCM
-  int r = mkdir("/mnt/sdcard/tmp", 755);
-  if (r == 0 || errno == EEXIST) {
-    fd_farend = fopen("/mnt/sdcard/tmp/far.dat", "w+");
-    fd_nearend = fopen("/mnt/sdcard/tmp/near.dat", "w+");
-    fd_echo = fopen("/mnt/sdcard/tmp/echo.dat", "w+");
-    fd_send = fopen("/mnt/sdcard/tmp/send.dat", "w+");
-  } else {
-    fd_farend = fd_nearend = fd_echo = fd_send = NULL;
+  // init WebRtc delay estimator instance
+  delayEstFar = WebRtc_CreateDelayEstimatorFarend(WEBRTC_SPECTRUM_SIZE, WEBRTC_HISTORY_SIZE);
+  delayEst = NULL;
+  if (delayEstFar) {
+    WebRtc_InitDelayEstimatorFarend(delayEstFar);
+    delayEst = WebRtc_CreateDelayEstimator(delayEstFar, 0);
+    if (delayEst) {
+      WebRtc_InitDelayEstimator(delayEst);
+    } else {
+      WebRtc_FreeDelayEstimatorFarend(delayEstFar);
+      delayEstFar = NULL;
+    }
   }
+  if (!delayEst) {
+    __android_log_print(ANDROID_LOG_ERROR, TAG, "failed to init WebRtc delay estimator");
+  }
+
+#if DUMP_PCM
+  open_dump_files();
 #endif
+  on = 1;
   t_start = timestamp(0);
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
   __android_log_print(ANDROID_LOG_DEBUG, TAG, "start at %" PRId64 "ms" , t_start); 
@@ -265,6 +319,7 @@ void runNearendProcessing()
       captured_samps += samps;
 
       dump_audio(inbuffer, fd_nearend, samps);
+
       short *out; // output(send) frame
       if (loop_idx <= playback_delay + echo_delay) {
         // output as-is
@@ -281,6 +336,24 @@ void runNearendProcessing()
       write_circular_buffer(nearend_buf, out, samps);
       dump_audio(refbuf, fd_echo, samps);
       dump_audio(out, fd_send, samps);
+      // XXX test delay
+      if (delayEst) {
+        float *b = to_float(inbuffer);
+        int delay = WebRtc_DelayEstimatorProcessFloat(delayEst, b, WEBRTC_SPECTRUM_SIZE);
+        // 不知道怎么回事，需要连续调用两遍。
+        delay = WebRtc_DelayEstimatorProcessFloat(delayEst, b, WEBRTC_SPECTRUM_SIZE); 
+        if (delay == -1) {
+          __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_DelayEstimatorProcessFloat() failed");
+        } else if (delay == -2) {
+          // 正常现象
+        } else {
+          if (echo_delay2 < 0 || echo_delay2 != delay) {
+            __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay: %dx%dms, at@%"PRId64"ms",
+                delay, WEBRTC_SPECTRUM_MS, timestamp(t0));
+            echo_delay2 = delay;
+          }
+        }
+      }
     } else {
       __android_log_print(ANDROID_LOG_DEBUG, TAG, "record nothing at @%"PRId64"ms", timestamp(t0));
     }
@@ -306,27 +379,32 @@ void runNearendProcessing()
     }
   }
 
-  android_CloseAudioDevice(p);
-  free_circular_buffer(farend_buf);
-  free_circular_buffer(echo_buf);
-  free_circular_buffer(nearend_buf);
-#if DUMP_PCM
-  if (fd_farend)
-    fclose(fd_farend);
-  if (fd_nearend)
-    fclose(fd_nearend);
-  if (fd_echo)
-    fclose(fd_echo);
-  if (fd_send)
-    fclose(fd_send);
-  fd_farend = fd_send = fd_nearend = NULL;
-#endif
-  speex_ec_close();
+  cleanup();
 }
 
 void stop()
 {
   on = 0;
+}
+
+void cleanup()
+{
+  android_CloseAudioDevice(p);
+  free_circular_buffer(farend_buf);
+  free_circular_buffer(echo_buf);
+  free_circular_buffer(nearend_buf);
+#if DUMP_PCM
+  close_dump_files();
+#endif
+  speex_ec_close();
+  if (delayEstFar) {
+    WebRtc_FreeDelayEstimatorFarend(delayEstFar);
+    delayEstFar = NULL;
+  }
+  if (delayEst) {
+    WebRtc_FreeDelayEstimator(delayEst);
+    delayEst = NULL;
+  }
 }
 
 int pull(JNIEnv *env, jshortArray buf)
@@ -340,11 +418,22 @@ int pull(JNIEnv *env, jshortArray buf)
   return n;
 }
 
+float *to_float(short *frame)
+{
+  static float buf[FRAME_SAMPS];
+  for (int i = 0; i < FRAME_SAMPS; ++i)
+    buf[i] = (float)frame[i] / 32768;
+  return buf;
+}
+
 int playback(short *_farend, int samps, bool with_aec_analyze)
 {
   // analyze
   if (with_aec_analyze) {
     write_circular_buffer(echo_buf, _farend, samps);
+  }
+  if (delayEst) {
+    WebRtc_AddFarSpectrumFloat(delayEstFar, to_float(_farend), samps);
   }
 
   // render
