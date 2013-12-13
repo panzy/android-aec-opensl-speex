@@ -415,7 +415,13 @@ void delay_estimator_destroy()
 // WebRtc_DelayEstimatorProcessFloat() 能精确地计算出延迟正是 |echo_delay|。但是
 // 若以 fd_nearend 为近端信号，总是得到 -2 (Insufficient data for estimation).
 // 重点是，fd_echo 与 fd_farend 的波形是完全相同的（除了在时间轴上的偏移量不同）
-// ，而 fd_nearend 与 fd_farend 的波形只是近似。
+// ，而 fd_nearend 与 fd_farend 的波形只是近似，并非精确匹配。
+//
+// PS. 
+// 1, 即使对输入的两个波形进行 normalize 处理（正常情况下 fd_nearend 信号的强度是
+// 显著弱于 fd_farend 的），结果也没有任何改善。
+// 2, 即使以 fd_echo 为近端信号，WebRtc_DelayEstimatorProcessFloat() 在得出结果
+// 前耗费的时间也太长了，大约需要处理 90(x10ms) 个数据快才开始返回有效值。
 void estimate_delay()
 {
   short far[WEBRTC_SPECTRUM_SIZE];
