@@ -150,10 +150,10 @@ void open_dump_files(const char *mode)
 {
   int r = mkdir("/mnt/sdcard/tmp", 755);
   if (r == 0 || errno == EEXIST) {
-    fd_farend = fopen("/mnt/sdcard/tmp/far.dat", mode);
-    fd_nearend = fopen("/mnt/sdcard/tmp/near.dat", mode);
-    fd_echo = fopen("/mnt/sdcard/tmp/echo.dat", mode);
-    fd_send = fopen("/mnt/sdcard/tmp/send.dat", mode);
+    fd_farend = fopen("/mnt/sdcard/tmp/far.raw", mode);
+    fd_nearend = fopen("/mnt/sdcard/tmp/near.raw", mode);
+    fd_echo = fopen("/mnt/sdcard/tmp/echo.raw", mode);
+    fd_send = fopen("/mnt/sdcard/tmp/send.raw", mode);
   } else {
     fd_farend = fd_nearend = fd_echo = fd_send = NULL;
   }

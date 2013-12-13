@@ -80,8 +80,8 @@ public class AudiotestActivity extends Activity {
         thread2 = new Thread() {
             public void run() {
                 try {
-                    //FileInputStream fis = new FileInputStream("/mnt/sdcard/tmp/speaker.dat");
-                    InputStream fis = AudiotestActivity.this.getAssets().open("speaker.dat");
+                    //FileInputStream fis = new FileInputStream("/mnt/sdcard/tmp/speaker.raw");
+                    InputStream fis = AudiotestActivity.this.getAssets().open("speaker.raw");
                     short[] buf = new short[FRAME_SAMPS];
                     byte[] bytes = new byte[FRAME_SAMPS * 2];
                     if (fis != null) {
@@ -145,7 +145,7 @@ public class AudiotestActivity extends Activity {
                 try {
                     short[] buf = new short[FRAME_SAMPS];
                     byte[] bytes = new byte[FRAME_SAMPS * 2];
-                    FileOutputStream fos = new FileOutputStream("/mnt/sdcard/tmp/out.dat");
+                    FileOutputStream fos = new FileOutputStream("/mnt/sdcard/tmp/out.raw");
                     while(thread != null) {
                         int n = opensl_example.pull(buf);
                         if (n > 0) {
