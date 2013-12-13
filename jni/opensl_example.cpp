@@ -34,7 +34,7 @@ extern "C" {
 #define FRAME_RATE (1000 / FRAME_MS) // frames per second
 
 // WebRtc delay estimator params
-#define WEBRTC_SPECTRUM_SIZE (FRAME_SAMPS * 1)
+#define WEBRTC_SPECTRUM_SIZE (80)
 #define WEBRTC_SPECTRUM_MS (WEBRTC_SPECTRUM_SIZE * FRAME_MS / FRAME_SAMPS)
 #define WEBRTC_HISTORY_SIZE ((1500 / 1000) * SR * SAMPLE_SIZE)
 
@@ -75,9 +75,14 @@ void *delayEst;
 static int on;
 OPENSL_STREAM  *p = NULL;
 
+// 上层输入的远端信号经过 farend_buf 缓存后再输入给 audio sytem.
+// 当 farend_buf 发生 underrun （入不敷出）时，会插入一定长度的静音。
 circular_buffer *farend_buf = NULL;
-circular_buffer *nearend_buf = NULL;
+// echo_buf 与 farend_buf 的区别在于：
+// 它的开头有|echo_delay|个 slience frame；
 circular_buffer *echo_buf = NULL;
+// 消除了回声的近端信号，供上层pull
+circular_buffer *nearend_buf = NULL;
 
 int64_t t_start;
 
@@ -192,7 +197,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
   // 5, [ in_buffer_cnt 和 out_buffer_cnt 对延迟没有影响 ]
   // ——，回声延时大约为 20x20=400ms(+-40)，而延时是与 out_bufferframes 成正比的（参见
   // AudioTrack::getMinFrameCount 的实现）
-  echo_delay = 20 * track_min_buf_size / 870;
+  echo_delay = 18 * track_min_buf_size / 870;
   // 延迟修正不足没关系，因为 speex AEC 模块有个 filter length 参数，初始化为
   // 8xframe，但是修正过度就很严重，将完全不能消除回声。
   echo_delay -= 2;
@@ -221,7 +226,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
 
   farend_buf = create_circular_buffer(FAREND_BUFFER_SAMPS);
   nearend_buf = create_circular_buffer(NEAREND_BUFFER_SAMPS);
-  echo_buf = create_circular_buffer((echo_delay + 4) * FRAME_SAMPS);
+  echo_buf = create_circular_buffer((echo_delay + playback_delay + 4) * 2 * FRAME_SAMPS);
 
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
 
@@ -257,10 +262,14 @@ void runNearendProcessing()
   short refbuf[FRAME_SAMPS];
   short processedbuffer[FRAME_SAMPS];
 
+  // delay echo_buf (relative to farend_buf)
+  for (int i = 0; i < echo_delay; ++i)
+    write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
+
   //
   // 每次循环处理一个 FRAME
   //
-  int loop_idx = 0;
+  int loop_idx = -1;
   int64_t t0 = timestamp(0), t1 = 0; // loop body begins
   int64_t total_ahead = 0; // 累计剩余时间
   int rendered_samps = 0;
@@ -292,8 +301,8 @@ void runNearendProcessing()
     ++loop_idx;
 
     // playback
-    if (loop_idx <= playback_delay) {
-      playback(silence, FRAME_SAMPS, false);
+    if (loop_idx < playback_delay) {
+      playback(silence, FRAME_SAMPS, true /* XXX test false */);
       rendered_samps += FRAME_SAMPS;
     } else {
       int samps = read_circular_buffer(farend_buf, inbuffer, FRAME_SAMPS);
@@ -311,6 +320,18 @@ void runNearendProcessing()
       }
     }
 
+    // esitmate echo delay
+    //`jif (delayEst) {
+    //`j  if (samps == FRAME_SAMPS) {
+    //`j    float *b = to_float(_farend);
+    //`j    WebRtc_AddFarSpectrumFloat(delayEstFar, b, WEBRTC_SPECTRUM_SIZE);
+    //`j    WebRtc_AddFarSpectrumFloat(delayEstFar, b + WEBRTC_SPECTRUM_SIZE, WEBRTC_SPECTRUM_SIZE);
+    //`j  } else {
+    //`j    __android_log_print(ANDROID_LOG_ERROR, TAG, "expect sample count to be %d, get %d", 
+    //`j        FRAME_MS, samps);
+    //`j  }
+    //`j}
+
     // record
     int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
     if (samps == FRAME_SAMPS) {
@@ -320,37 +341,48 @@ void runNearendProcessing()
 
       dump_audio(inbuffer, fd_nearend, samps);
 
-      short *out; // output(send) frame
-      if (loop_idx <= playback_delay + echo_delay) {
+      short *out = inbuffer; // output(send) frame
+      read_circular_buffer(echo_buf, refbuf, samps);
+      if (loop_idx < playback_delay + echo_delay) {
         // output as-is
-        out = inbuffer;
-        memset(refbuf, 255, samps * 2);
       } else {
         // do AEC
-        read_circular_buffer(echo_buf, refbuf, samps);
         speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
         speex_preprocess_run(den, processedbuffer);
         out = processedbuffer;
       }
       // output
       write_circular_buffer(nearend_buf, out, samps);
-      dump_audio(refbuf, fd_echo, samps);
       dump_audio(out, fd_send, samps);
+      dump_audio(refbuf, fd_echo, samps);
       // XXX test delay
       if (delayEst) {
+        {
+          float *b = to_float(refbuf);
+          if (0 != WebRtc_AddFarSpectrumFloat(delayEstFar, b, WEBRTC_SPECTRUM_SIZE)) {
+            __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_AddFarSpectrumFloat() failed");
+          }
+          if (0 != WebRtc_AddFarSpectrumFloat(delayEstFar, b + WEBRTC_SPECTRUM_SIZE, WEBRTC_SPECTRUM_SIZE)) {
+            __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_AddFarSpectrumFloat() failed");
+          }
+        }
+
         float *b = to_float(inbuffer);
         int delay = WebRtc_DelayEstimatorProcessFloat(delayEst, b, WEBRTC_SPECTRUM_SIZE);
         // 不知道怎么回事，需要连续调用两遍。
-        delay = WebRtc_DelayEstimatorProcessFloat(delayEst, b, WEBRTC_SPECTRUM_SIZE); 
+        delay = WebRtc_DelayEstimatorProcessFloat(delayEst, b + WEBRTC_SPECTRUM_SIZE, WEBRTC_SPECTRUM_SIZE); 
         if (delay == -1) {
           __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_DelayEstimatorProcessFloat() failed");
         } else if (delay == -2) {
           // 正常现象
         } else {
-          if (echo_delay2 < 0 || echo_delay2 != delay) {
-            __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay: %dx%dms, at@%"PRId64"ms",
-                delay, WEBRTC_SPECTRUM_MS, timestamp(t0));
+          static int last_quality = 0;
+          int curr_quality = WebRtc_last_delay_quality(delayEst);
+          if (echo_delay2 < 0 || last_quality < curr_quality) {
+            __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay: %dx%dms, at@%"PRId64"ms, quality %d",
+                delay, WEBRTC_SPECTRUM_MS, timestamp(t0), curr_quality);
             echo_delay2 = delay;
+            last_quality = curr_quality;
           }
         }
       }
@@ -426,14 +458,13 @@ float *to_float(short *frame)
   return buf;
 }
 
+//
+// @param samps - 不需要等于 FRAME_SAMPS
 int playback(short *_farend, int samps, bool with_aec_analyze)
 {
   // analyze
   if (with_aec_analyze) {
     write_circular_buffer(echo_buf, _farend, samps);
-  }
-  if (delayEst) {
-    WebRtc_AddFarSpectrumFloat(delayEstFar, to_float(_farend), samps);
   }
 
   // render
