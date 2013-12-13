@@ -282,6 +282,13 @@ SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_pull(JNIEnv *jen
 }
 
 
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_estimate_1delay(JNIEnv *jenv, jclass jcls) {
+  (void)jenv;
+  (void)jcls;
+  estimate_delay();
+}
+
+
 SWIGEXPORT jdouble JNICALL Java_opensl_1example_opensl_1exampleJNI_getTimestamp(JNIEnv *jenv, jclass jcls) {
   jdouble jresult = 0 ;
   double result;

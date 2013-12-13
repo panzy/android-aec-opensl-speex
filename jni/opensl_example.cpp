@@ -57,8 +57,11 @@ extern "C" {
 
 //--------------------------------------------------------------------------------
 
+void delay_estimator_init();
+void delay_estimator_destroy();
 void cleanup();
 void dump_audio_(short *frame, FILE *fd, int samps);
+void estimate_delay();
 void speex_ec_open (int sampleRate, int bufsize, int totalSize);
 void speex_ec_close ();
 int playback(short *_farend, int samps, bool with_aec_analyze);
@@ -143,14 +146,14 @@ void dump_audio_(short *frame, FILE *fd, int samps)
   }
 }
 
-void open_dump_files()
+void open_dump_files(const char *mode)
 {
   int r = mkdir("/mnt/sdcard/tmp", 755);
   if (r == 0 || errno == EEXIST) {
-    fd_farend = fopen("/mnt/sdcard/tmp/far.dat", "w+");
-    fd_nearend = fopen("/mnt/sdcard/tmp/near.dat", "w+");
-    fd_echo = fopen("/mnt/sdcard/tmp/echo.dat", "w+");
-    fd_send = fopen("/mnt/sdcard/tmp/send.dat", "w+");
+    fd_farend = fopen("/mnt/sdcard/tmp/far.dat", mode);
+    fd_nearend = fopen("/mnt/sdcard/tmp/near.dat", mode);
+    fd_echo = fopen("/mnt/sdcard/tmp/echo.dat", mode);
+    fd_send = fopen("/mnt/sdcard/tmp/send.dat", mode);
   } else {
     fd_farend = fd_nearend = fd_echo = fd_send = NULL;
   }
@@ -200,7 +203,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
   echo_delay = 18 * track_min_buf_size / 870;
   // 延迟修正不足没关系，因为 speex AEC 模块有个 filter length 参数，初始化为
   // 8xframe，但是修正过度就很严重，将完全不能消除回声。
-  echo_delay -= 2;
+  echo_delay -= 4;
 
   const int sample_size = sizeof(short);
   in_buffer_cnt = ceil((float)record_min_buf_size / sample_size / FRAME_SAMPS);
@@ -230,30 +233,14 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
 
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
 
-  // init WebRtc delay estimator instance
-  delayEstFar = WebRtc_CreateDelayEstimatorFarend(WEBRTC_SPECTRUM_SIZE, WEBRTC_HISTORY_SIZE);
-  delayEst = NULL;
-  if (delayEstFar) {
-    WebRtc_InitDelayEstimatorFarend(delayEstFar);
-    delayEst = WebRtc_CreateDelayEstimator(delayEstFar, 0);
-    if (delayEst) {
-      WebRtc_InitDelayEstimator(delayEst);
-    } else {
-      WebRtc_FreeDelayEstimatorFarend(delayEstFar);
-      delayEstFar = NULL;
-    }
-  }
-  if (!delayEst) {
-    __android_log_print(ANDROID_LOG_ERROR, TAG, "failed to init WebRtc delay estimator");
-  }
-
 #if DUMP_PCM
-  open_dump_files();
+  open_dump_files("w+");
 #endif
   on = 1;
   t_start = timestamp(0);
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
   __android_log_print(ANDROID_LOG_DEBUG, TAG, "start at %" PRId64 "ms" , t_start); 
+
 }
 
 void runNearendProcessing() 
@@ -320,18 +307,6 @@ void runNearendProcessing()
       }
     }
 
-    // esitmate echo delay
-    //`jif (delayEst) {
-    //`j  if (samps == FRAME_SAMPS) {
-    //`j    float *b = to_float(_farend);
-    //`j    WebRtc_AddFarSpectrumFloat(delayEstFar, b, WEBRTC_SPECTRUM_SIZE);
-    //`j    WebRtc_AddFarSpectrumFloat(delayEstFar, b + WEBRTC_SPECTRUM_SIZE, WEBRTC_SPECTRUM_SIZE);
-    //`j  } else {
-    //`j    __android_log_print(ANDROID_LOG_ERROR, TAG, "expect sample count to be %d, get %d", 
-    //`j        FRAME_MS, samps);
-    //`j  }
-    //`j}
-
     // record
     int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
     if (samps == FRAME_SAMPS) {
@@ -355,37 +330,6 @@ void runNearendProcessing()
       write_circular_buffer(nearend_buf, out, samps);
       dump_audio(out, fd_send, samps);
       dump_audio(refbuf, fd_echo, samps);
-      // XXX test delay
-      if (delayEst) {
-        {
-          float *b = to_float(refbuf);
-          if (0 != WebRtc_AddFarSpectrumFloat(delayEstFar, b, WEBRTC_SPECTRUM_SIZE)) {
-            __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_AddFarSpectrumFloat() failed");
-          }
-          if (0 != WebRtc_AddFarSpectrumFloat(delayEstFar, b + WEBRTC_SPECTRUM_SIZE, WEBRTC_SPECTRUM_SIZE)) {
-            __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_AddFarSpectrumFloat() failed");
-          }
-        }
-
-        float *b = to_float(inbuffer);
-        int delay = WebRtc_DelayEstimatorProcessFloat(delayEst, b, WEBRTC_SPECTRUM_SIZE);
-        // 不知道怎么回事，需要连续调用两遍。
-        delay = WebRtc_DelayEstimatorProcessFloat(delayEst, b + WEBRTC_SPECTRUM_SIZE, WEBRTC_SPECTRUM_SIZE); 
-        if (delay == -1) {
-          __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_DelayEstimatorProcessFloat() failed");
-        } else if (delay == -2) {
-          // 正常现象
-        } else {
-          static int last_quality = 0;
-          int curr_quality = WebRtc_last_delay_quality(delayEst);
-          if (echo_delay2 < 0 || last_quality < curr_quality) {
-            __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay: %dx%dms, at@%"PRId64"ms, quality %d",
-                delay, WEBRTC_SPECTRUM_MS, timestamp(t0), curr_quality);
-            echo_delay2 = delay;
-            last_quality = curr_quality;
-          }
-        }
-      }
     } else {
       __android_log_print(ANDROID_LOG_DEBUG, TAG, "record nothing at @%"PRId64"ms", timestamp(t0));
     }
@@ -429,6 +373,31 @@ void cleanup()
   close_dump_files();
 #endif
   speex_ec_close();
+  delay_estimator_destroy();
+}
+
+void delay_estimator_init()
+{
+  // init WebRtc delay estimator instance
+  delayEstFar = WebRtc_CreateDelayEstimatorFarend(WEBRTC_SPECTRUM_SIZE, WEBRTC_HISTORY_SIZE);
+  delayEst = NULL;
+  if (delayEstFar) {
+    WebRtc_InitDelayEstimatorFarend(delayEstFar);
+    delayEst = WebRtc_CreateDelayEstimator(delayEstFar, 0);
+    if (delayEst) {
+      WebRtc_InitDelayEstimator(delayEst);
+    } else {
+      WebRtc_FreeDelayEstimatorFarend(delayEstFar);
+      delayEstFar = NULL;
+    }
+  }
+  if (!delayEst) {
+    __android_log_print(ANDROID_LOG_ERROR, TAG, "failed to init WebRtc delay estimator");
+  }
+}
+
+void delay_estimator_destroy() 
+{
   if (delayEstFar) {
     WebRtc_FreeDelayEstimatorFarend(delayEstFar);
     delayEstFar = NULL;
@@ -437,6 +406,80 @@ void cleanup()
     WebRtc_FreeDelayEstimator(delayEst);
     delayEst = NULL;
   }
+}
+
+// 以 dump file 为输入，估算回声延迟。
+//
+// 测试结果：
+// 以 fd_farend 为远端信号、fd_echo 为近端信号时，
+// WebRtc_DelayEstimatorProcessFloat() 能精确地计算出延迟正是 |echo_delay|。但是
+// 若以 fd_nearend 为近端信号，总是得到 -2 (Insufficient data for estimation).
+// 重点是，fd_echo 与 fd_farend 的波形是完全相同的（除了在时间轴上的偏移量不同）
+// ，而 fd_nearend 与 fd_farend 的波形只是近似。
+void estimate_delay()
+{
+  short far[WEBRTC_SPECTRUM_SIZE];
+  short near[WEBRTC_SPECTRUM_SIZE];
+  int last_quality = 0;
+
+  open_dump_files("r");
+  if (!fd_farend || !fd_echo || !fd_nearend) {
+      __android_log_print(ANDROID_LOG_ERROR, TAG, "failed to open dump files at %d", __LINE__ );
+      return;
+  }
+
+  delay_estimator_init();
+  if (!delayEst)
+    return;
+
+  for (int i = 0; i < WEBRTC_HISTORY_SIZE / WEBRTC_SPECTRUM_SIZE; ++i)
+  {
+    // add
+    int n = fread(far, 2, WEBRTC_SPECTRUM_SIZE, fd_farend);
+    if (WEBRTC_SPECTRUM_SIZE != n) {
+      __android_log_print(ANDROID_LOG_ERROR, TAG, "fread() failed at %d, %d, errno %d, size %d", __LINE__, i, errno, n);
+      break;
+    }
+
+    float *b = to_float(far);
+    if (0 != WebRtc_AddFarSpectrumFloat(delayEstFar, b, WEBRTC_SPECTRUM_SIZE)) {
+      __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_AddFarSpectrumFloat() failed");
+      break;
+    }
+
+    // process
+
+    //if (i < 7) continue; // delay
+
+    n = fread(near, 2, WEBRTC_SPECTRUM_SIZE, fd_nearend);
+    if (WEBRTC_SPECTRUM_SIZE != n) {
+      __android_log_print(ANDROID_LOG_ERROR, TAG, "fread() failed at %d", __LINE__ );
+      break;
+    }
+
+    b = to_float(near);
+    int delay = WebRtc_DelayEstimatorProcessFloat(delayEst, b, WEBRTC_SPECTRUM_SIZE);
+    // 不知道怎么回事，需要连续调用两遍。
+    delay = WebRtc_DelayEstimatorProcessFloat(delayEst, b, WEBRTC_SPECTRUM_SIZE); 
+    if (delay == -1) {
+      __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_DelayEstimatorProcessFloat() failed");
+    } else if (delay == -2) {
+      // 正常现象
+      __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_DelayEstimatorProcessFloat() Insufficient data, #%d", i);
+    } else {
+      int curr_quality = WebRtc_last_delay_quality(delayEst);
+      if (echo_delay2 < 0 || last_quality < curr_quality) {
+        __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay: %dx%dms, at spectrum #%d, quality %d",
+            delay, WEBRTC_SPECTRUM_MS, i, curr_quality);
+        echo_delay2 = delay;
+        last_quality = curr_quality;
+      }
+    }
+  }
+
+  close_dump_files();
+  delay_estimator_destroy();
+  __android_log_print(ANDROID_LOG_ERROR, TAG, "done");
 }
 
 int pull(JNIEnv *env, jshortArray buf)

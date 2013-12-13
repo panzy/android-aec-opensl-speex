@@ -165,10 +165,14 @@ public class AudiotestActivity extends Activity {
             }
         };
 
-        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay);
-		thread.start();
-        thread2.start();
-        //thread3.start();
+        if (true) {
+            opensl_example.start(track_minbufsz, record_minbufsz, playback_delay);
+            thread.start();
+            thread2.start();
+            //thread3.start();
+        } else {
+            opensl_example.estimate_delay();
+        }
 
         checkAudioLowLatencyFeature();
 

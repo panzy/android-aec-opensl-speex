@@ -29,6 +29,10 @@ public class opensl_example {
     return opensl_exampleJNI.pull(buf);
   }
 
+  public static void estimate_delay() {
+    opensl_exampleJNI.estimate_delay();
+  }
+
   public static double getTimestamp() {
     return opensl_exampleJNI.getTimestamp();
   }
