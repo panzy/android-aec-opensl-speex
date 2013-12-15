@@ -16,11 +16,8 @@
 #include "speex/speex_echo.h"
 #include "speex/speex_preprocess.h"
 
-extern "C" {
-#include "webrtc/modules/audio_processing/utility/delay_estimator_wrapper.h"
-}
-
 #include "opensl_example.h"
+#include "delay_estimator.h"
 
 // from <inttypes.h>
 #define	PRId64			"lld"		/* int64_t */
@@ -57,7 +54,9 @@ extern "C" {
 
 //--------------------------------------------------------------------------------
 
-void delay_estimator_init();
+
+//--------------------------------------------------------------------------------
+
 void delay_estimator_destroy();
 void cleanup();
 void dump_audio_(short *frame, FILE *fd, int samps);
@@ -66,17 +65,13 @@ void speex_ec_open (int sampleRate, int bufsize, int totalSize);
 void speex_ec_close ();
 int playback(short *_farend, int samps, bool with_aec_analyze);
 float *to_float(short *frame);
-void echo_cancel(short *in, short *ref, int samps,
-        short *out, float *cancellation_ratio);
-int search_audio(short *haystack, int haystack_samps, short *needle, int needle_samps, float *quality);
 
 //--------------------------------------------------------------------------------
 
 SpeexEchoState *st;
 SpeexPreprocessState *den;
 
-void *delayEstFar;
-void *delayEst;
+delay_estimator *delayEst;
 
 static int on;
 OPENSL_STREAM  *p = NULL;
@@ -376,129 +371,14 @@ void cleanup()
   close_dump_files();
 #endif
   speex_ec_close();
-  delay_estimator_destroy();
-}
-
-void delay_estimator_init()
-{
-  // init WebRtc delay estimator instance
-  delayEstFar = WebRtc_CreateDelayEstimatorFarend(WEBRTC_SPECTRUM_SIZE, WEBRTC_HISTORY_SIZE);
-  delayEst = NULL;
-  if (delayEstFar) {
-    WebRtc_InitDelayEstimatorFarend(delayEstFar);
-    delayEst = WebRtc_CreateDelayEstimator(delayEstFar, 0);
-    if (delayEst) {
-      WebRtc_InitDelayEstimator(delayEst);
-    } else {
-      WebRtc_FreeDelayEstimatorFarend(delayEstFar);
-      delayEstFar = NULL;
-    }
-  }
-  if (!delayEst) {
-    __android_log_print(ANDROID_LOG_ERROR, TAG, "failed to init WebRtc delay estimator");
-  }
-}
-
-void delay_estimator_destroy() 
-{
-  if (delayEstFar) {
-    WebRtc_FreeDelayEstimatorFarend(delayEstFar);
-    delayEstFar = NULL;
-  }
-  if (delayEst) {
-    WebRtc_FreeDelayEstimator(delayEst);
-    delayEst = NULL;
-  }
-}
-
-// 以 dump file 为输入，估算回声延迟。
-//
-// 测试结果：
-// 以 fd_farend 为远端信号、fd_echo 为近端信号时，
-// WebRtc_DelayEstimatorProcessFloat() 能精确地计算出延迟正是 |echo_delay|。但是
-// 若以 fd_nearend 为近端信号，总是得到 -2 (Insufficient data for estimation).
-// 重点是，fd_echo 与 fd_farend 的波形是完全相同的（除了在时间轴上的偏移量不同）
-// ，而 fd_nearend 与 fd_farend 的波形只是近似，并非精确匹配。
-//
-// PS. 
-// 1, 即使对输入的两个波形进行 normalize 处理（正常情况下 fd_nearend 信号的强度是
-// 显著弱于 fd_farend 的），结果也没有任何改善。
-// 2, 即使以 fd_echo 为近端信号，WebRtc_DelayEstimatorProcessFloat() 在得出结果
-// 前耗费的时间也太长了，大约需要处理 90(x10ms) 个数据快才开始返回有效值。
-void estimate_delay2()
-{
-  short far[WEBRTC_SPECTRUM_SIZE];
-  short near[WEBRTC_SPECTRUM_SIZE];
-  int last_quality = 0;
-
-  open_dump_files("r");
-  if (!fd_farend || !fd_echo || !fd_nearend) {
-      __android_log_print(ANDROID_LOG_ERROR, TAG, "failed to open dump files at %d", __LINE__ );
-      return;
-  }
-
-  delay_estimator_init();
-  if (!delayEst)
-    return;
-
-  for (int i = 0; i < WEBRTC_HISTORY_SIZE / WEBRTC_SPECTRUM_SIZE; ++i)
-  {
-    // add
-    int n = fread(far, 2, WEBRTC_SPECTRUM_SIZE, fd_farend);
-    if (WEBRTC_SPECTRUM_SIZE != n) {
-      __android_log_print(ANDROID_LOG_ERROR, TAG, "fread() failed at %d, %d, errno %d, size %d", __LINE__, i, errno, n);
-      break;
-    }
-
-    float *b = to_float(far);
-    if (0 != WebRtc_AddFarSpectrumFloat(delayEstFar, b, WEBRTC_SPECTRUM_SIZE)) {
-      __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_AddFarSpectrumFloat() failed");
-      break;
-    }
-
-    // process
-
-    //if (i < 7) continue; // delay
-
-    n = fread(near, 2, WEBRTC_SPECTRUM_SIZE, fd_nearend);
-    if (WEBRTC_SPECTRUM_SIZE != n) {
-      __android_log_print(ANDROID_LOG_ERROR, TAG, "fread() failed at %d", __LINE__ );
-      break;
-    }
-
-    b = to_float(near);
-    int delay = WebRtc_DelayEstimatorProcessFloat(delayEst, b, WEBRTC_SPECTRUM_SIZE);
-    // 不知道怎么回事，需要连续调用两遍。
-    delay = WebRtc_DelayEstimatorProcessFloat(delayEst, b, WEBRTC_SPECTRUM_SIZE); 
-    if (delay == -1) {
-      __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_DelayEstimatorProcessFloat() failed");
-    } else if (delay == -2) {
-      // 正常现象
-      __android_log_print(ANDROID_LOG_ERROR, TAG, "WebRtc_DelayEstimatorProcessFloat() Insufficient data, #%d", i);
-    } else {
-      int curr_quality = WebRtc_last_delay_quality(delayEst);
-      if (echo_delay2 < 0 || last_quality < curr_quality) {
-        __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay: %dx%dms, at spectrum #%d, quality %d",
-            delay, WEBRTC_SPECTRUM_MS, i, curr_quality);
-        echo_delay2 = delay;
-        last_quality = curr_quality;
-      }
-    }
-  }
-
-  close_dump_files();
-  delay_estimator_destroy();
-  __android_log_print(ANDROID_LOG_ERROR, TAG, "done");
 }
 
 void estimate_delay()
 {
   const int MAX_DELAY = 50;
-  const int far_samps = FRAME_SAMPS * MAX_DELAY; // search scope in farend
-  const int samps = FRAME_SAMPS * 20; // size of search target
-  short far[far_samps];
-  short near[samps];
-  char delay_score[MAX_DELAY]; // [delay] => score
+  short far[MAX_DELAY * FRAME_SAMPS];
+  short near[FRAME_SAMPS];
+  delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY);
 
   open_dump_files("r");
   if (!fd_farend || !fd_echo || !fd_nearend) {
@@ -506,122 +386,31 @@ void estimate_delay()
       return;
   }
 
-  fread(far, 2, far_samps, fd_farend);
+  fread(far, 2, MAX_DELAY * FRAME_SAMPS, fd_farend);
+  delayEst->add_far(far, MAX_DELAY * FRAME_SAMPS * 2); // TODO 丢弃开头的无效数据
 
-  memset(delay_score, 0, sizeof(delay_score) / sizeof(delay_score[0]));
-
-  for (int i = 5; i < far_samps / FRAME_SAMPS; ++i)
+  int prev_delay = -1;
+  int i = 0;
+  fseek(fd_nearend, i * FRAME_SAMPS * 2, SEEK_SET);
+  for (; i < MAX_DELAY; ++i)
   {
-    fseek(fd_nearend, i * FRAME_SAMPS * 2, SEEK_SET);
-    fread(near, 2, samps, fd_nearend);
+    fread(near, 2, FRAME_SAMPS, fd_nearend);
     float quality = 0;
-    int d = search_audio(far, far_samps, near, samps, &quality);
+    int d = delayEst->process_near(near, &quality);
     if (d >= 0) {
-      d = i - d;
-      __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay: (%d~%d), %0.2f", i, d, quality);
-      if (++delay_score[d] > 3) {
-        __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay, the final result: %d", d);
+      if (d == prev_delay) // TODO 丢弃开头的无效数据
         break;
-      }
+      else
+        prev_delay = d;
     }
   }
 
 
   close_dump_files();
-}
-
-bool silent(short *data, int samps)
-{
-  // TODO is this method reliable enough?
-  int n0 = 0;
-  for (int i = 0; i < samps; ++i) {
-    if (abs(data[i]) < 150)
-      ++n0;
+  if (delayEst) {
+    delete delayEst;
+    delayEst = NULL;
   }
-  return n0 * 100 / samps > 90;
-}
-
-// return: count of |FRAME_SAMPS|
-int search_audio(short *haystack, int haystack_samps, short *needle, int needle_samps, float *quality)
-{
-  if (silent(needle, needle_samps)) {
-    __android_log_print(ANDROID_LOG_DEBUG, TAG, "ignore silent needle at frame");
-    return -1;
-  }
-
-  float best_ratio = 99;
-  int best_delay = -1; // in frame
-  short *out = new short[needle_samps];
-  int pos = 0; // in samps
-  while (pos < haystack_samps - needle_samps) {
-    float ratio;
-    echo_cancel(needle, haystack + pos, needle_samps, out, &ratio);
-    //__android_log_print(ANDROID_LOG_DEBUG, TAG,
-    //    "echo cancellation ratio at frame %d: %0.2f", pos / FRAME_SAMPS, ratio);
-
-    if (ratio > 0 && ratio < 0.99 && ratio < best_ratio) {
-      best_ratio = ratio;
-      best_delay = pos / FRAME_SAMPS;
-    }
-
-    pos += FRAME_SAMPS;
-  }
-
-  // dump best result
-  if (best_delay >= 0) {
-    if (quality) *quality = 1 / best_ratio - 1;
-    pos = best_delay * FRAME_SAMPS;
-    // reproduce
-    echo_cancel(needle, haystack + pos, needle_samps, out, NULL);
-    //__android_log_print(ANDROID_LOG_DEBUG, TAG,
-    //    "best echo cancellation ratio at frame %d: %0.2f", best_delay, best_ratio);
-    
-    // dump
-#if 0
-    char filename[128];
-    sprintf(filename, "sdcard/tmp/out_%d_%0.2f.raw", best_delay, best_ratio);
-    FILE *f = fopen(filename, "w+");
-    fwrite(out, needle_samps, 2, f);
-    fclose(f);
-#endif
-  } else {
-    if (quality) *quality = 0;
-  }
-
-  delete[] out;
-
-  return best_delay;
-}
-
-void echo_cancel(short *in, short *ref, int samps,
-        short *out, float *cancellation_ratio)
-{
-  speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 2);
-
-  short *p1 = in, *p2 = ref, *p3 = out;
-  int n = samps;
-  while (n >= FRAME_SAMPS) {
-    speex_echo_cancellation(st, p1, p2, p3);
-    p1 += FRAME_SAMPS;
-    p2 += FRAME_SAMPS;
-    p3 += FRAME_SAMPS;
-    n -= FRAME_SAMPS;
-  }
-
-  speex_ec_close();
-
-  if (cancellation_ratio) {
-    int sum1 = 0, sum2 = 0;
-    for (int i = 0; i < samps; ++i) {
-      sum1 += abs(in[i]);
-      sum2 += abs(out[i]);
-    }
-    *cancellation_ratio = sum1 == 0 ? 0 : (float)sum2 / sum1;
-  }
-
-  //__android_log_print(ANDROID_LOG_DEBUG, TAG, "out frame");
-  //for (int i = 0; i < samps; ++i)
-  //    __android_log_print(ANDROID_LOG_DEBUG, TAG, "%d", out[i]);
 }
 
 int pull(JNIEnv *env, jshortArray buf)
