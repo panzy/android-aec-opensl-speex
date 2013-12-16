@@ -387,16 +387,14 @@ void estimate_delay()
       return;
   }
 
-  fread(far, 2, MAX_DELAY * FRAME_SAMPS, fd_farend);
-  delayEst->add_far(far, MAX_DELAY * FRAME_SAMPS);
-  fread(far, 2, MAX_DELAY * FRAME_SAMPS, fd_farend);
-  //delayEst->add_far(far, MAX_DELAY * FRAME_SAMPS);
-
   int64_t t0 = timestamp(0);
   int i = 0;
   fseek(fd_nearend, i * FRAME_SAMPS * 2, SEEK_SET);
-  for (; i < MAX_DELAY + delayEst->get_far_offset() / FRAME_SAMPS + NEAREND_SIZE; ++i)
+  for (; i < MAX_DELAY * 2; ++i)
   {
+    fread(far, 2, FRAME_SAMPS, fd_farend);
+    delayEst->add_far(far, FRAME_SAMPS);
+
     fread(near, 2, FRAME_SAMPS, fd_nearend);
     float quality = 0;
     int d = delayEst->process_near(near, FRAME_SAMPS, &quality);
