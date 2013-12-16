@@ -14,18 +14,25 @@ class delay_estimator {
   short *near;
   char *delay_score; // [delay] => score
   int far_samps;
+  int far_offset; // count of passed samples in |far| buffer
   int near_samps; // count of samps in |near| buffer
-  int passed; // count of passed frame in |near| buffer
+  int near_offset; // count of passed samples in |near| buffer
   float best_quality;
   int best_delay;
   SpeexEchoState *st;
 
   public:
 
-  delay_estimator(int sr, int frame_samps, int max_delay);
+  // max_delay - size of farend buffer in frames
+  // nearend_frames - size of nearend buffer in frames
+  delay_estimator(int sr, int frame_samps, int max_delay, int nearend_frames);
   ~delay_estimator();
-  int add_far(short *buf, int n);
-  int process_near(short *frame, float *quality_);
+  int add_far(short *data, int samps);
+  // quality - output, can be NULL
+  int process_near(short *data, int samps, float *quality);
+
+  int get_far_offset() { return far_offset; }
+  int get_near_offset() { return near_offset; }
 
   private:
 

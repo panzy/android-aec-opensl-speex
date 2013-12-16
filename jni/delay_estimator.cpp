@@ -73,7 +73,7 @@ void delay_estimator::echo_cancel(short *in, short *ref, int samps,
 int delay_estimator::search_audio(short *haystack, int haystack_samps, short *needle, int needle_samps, float *quality)
 {
   if (silent(needle, needle_samps)) {
-    __android_log_print(ANDROID_LOG_DEBUG, TAG, "ignore silent needle at frame");
+    //__android_log_print(ANDROID_LOG_DEBUG, TAG, "ignore silent needle at frame");
     return -1;
   }
 
@@ -84,10 +84,12 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
   while (pos < haystack_samps - needle_samps) {
     float ratio;
     echo_cancel(needle, haystack + pos, needle_samps, out, &ratio);
-    //__android_log_print(ANDROID_LOG_DEBUG, TAG,
-    //    "echo cancellation ratio at frame %d: %0.2f", pos / FRAME_SAMPS, ratio);
+#if 0
+    __android_log_print(ANDROID_LOG_DEBUG, TAG,
+        "echo cancellation ratio at frame %d: %0.2f", pos / FRAME_SAMPS, ratio);
+#endif
 
-    if (ratio > 0 && ratio < 0.99 && ratio < best_ratio) {
+    if (ratio > 0 && ratio < 0.9 && ratio < best_ratio) {
       best_ratio = ratio;
       best_delay = pos / FRAME_SAMPS;
     }
@@ -121,19 +123,21 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
   return best_delay;
 }
 
-delay_estimator::delay_estimator(int sr, int frame_samps, int max_delay)
+delay_estimator::delay_estimator(int sr, int frame_samps, int max_delay, int nearend_frames)
 : SR(sr),
   FRAME_SAMPS(frame_samps),
   MAX_DELAY(max_delay),
   MAX_FAR_SAMPS(FRAME_SAMPS * MAX_DELAY),
-  MAX_NEAR_SAMPS(FRAME_SAMPS * 10),
-  far_samps(0), near_samps(0), passed(0),
+  MAX_NEAR_SAMPS(FRAME_SAMPS * nearend_frames),
+  far_samps(0), far_offset(0),
+  near_samps(0), near_offset(0),
   best_quality(0),
   best_delay(0)
 {
   far = new short[MAX_FAR_SAMPS];
   near = new short[MAX_NEAR_SAMPS];
   delay_score = new char[MAX_DELAY]; // [delay] => score
+  memset(delay_score, 0, sizeof(delay_score) / sizeof(delay_score[0]));
 }
 
 delay_estimator::~delay_estimator()
@@ -143,47 +147,54 @@ delay_estimator::~delay_estimator()
   delete[] delay_score;
 }
 
-int delay_estimator::add_far(short *buf, int n)
+int delay_estimator::add_far(short *data, int n)
 {
-  if (far_samps + n > MAX_FAR_SAMPS)
-    n = MAX_FAR_SAMPS - far_samps;
-  memcpy(far + far_samps, buf, n * 2);
+  if (far_samps + n > MAX_FAR_SAMPS) {
+    int shift = far_samps + n - MAX_FAR_SAMPS;
+    memmove(far, far + shift, (MAX_FAR_SAMPS - n) * 2);
+    far_samps = MAX_FAR_SAMPS - n;
+    far_offset += shift;
+  }
+  memcpy(far + far_samps, data, n * 2);
   far_samps += n;
   return n;
 }
 
-int delay_estimator::process_near(short *frame, float *quality_)
+int delay_estimator::process_near(short *data, int n, float *quality_)
 {
   // push new frame to |near|
-  if (near_samps == MAX_NEAR_SAMPS) {
-    // shift a frame
-    memmove(near, near + FRAME_SAMPS, (MAX_NEAR_SAMPS - FRAME_SAMPS) * 2);
-    //for (int i = 0; i < MAX_NEAR_SAMPS - FRAME_SAMPS; ++i) near[i] = near[i + FRAME_SAMPS];
-    near_samps -= FRAME_SAMPS;
-    ++passed;
+  if (near_samps + n > MAX_NEAR_SAMPS) {
+    int shift = near_samps + n - MAX_NEAR_SAMPS;
+    memmove(near, near + shift, (MAX_NEAR_SAMPS - n) * 2);
+    near_samps = MAX_NEAR_SAMPS - n;
+    near_offset += shift;
   }
-  memcpy(near + near_samps, frame, FRAME_SAMPS * 2);
-  near_samps += FRAME_SAMPS;
+  memcpy(near + near_samps, data, n * 2);
+  near_samps += n;
 
   if (near_samps < MAX_NEAR_SAMPS)
     return -1;
 
   // iterate |near| buffer to search in |far| buffer
-  memset(delay_score, 0, sizeof(delay_score) / sizeof(delay_score[0]));
   float quality = 0;
   int result = -1;
   {
     int d = search_audio(far, far_samps, near, near_samps, &quality);
-    if (d >= 0) {
-      d = passed - d;
+    result = (near_offset - far_offset) / FRAME_SAMPS - d;
+    if (d >= 0 && result >= 0) {
       if (quality_) *quality_ = quality;
-      __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay: (%d~%d), %0.2f", passed, d, quality);
-      if (++delay_score[d] > 3 && quality > best_quality) {
-        result = d;
+      __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay: (%d~%d,%d+%d)=>%d, %0.2f",
+          near_offset / FRAME_SAMPS, (near_offset + near_samps) / FRAME_SAMPS,
+          far_offset / FRAME_SAMPS, d, result, quality);
+      if (++delay_score[d] > 2 && (result == best_delay || quality > best_quality)) {
         best_quality = quality;
         best_delay = result;
-        __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay, the final result: %d, %0.2f", d, quality);
+        __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay, the final result: %d, %0.2f", result, quality);
+      } else {
+        result = -1;
       }
+    } else {
+      result = -1;
     }
   }
 

@@ -376,9 +376,10 @@ void cleanup()
 void estimate_delay()
 {
   const int MAX_DELAY = 50;
+  const int NEAREND_SIZE = 10;
   short far[MAX_DELAY * FRAME_SAMPS];
   short near[FRAME_SAMPS];
-  delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY);
+  delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
 
   open_dump_files("r");
   if (!fd_farend || !fd_echo || !fd_nearend) {
@@ -387,21 +388,19 @@ void estimate_delay()
   }
 
   fread(far, 2, MAX_DELAY * FRAME_SAMPS, fd_farend);
-  delayEst->add_far(far, MAX_DELAY * FRAME_SAMPS * 2); // TODO 丢弃开头的无效数据
+  delayEst->add_far(far, MAX_DELAY * FRAME_SAMPS);
+  fread(far, 2, MAX_DELAY * FRAME_SAMPS, fd_farend);
+  delayEst->add_far(far, MAX_DELAY * FRAME_SAMPS);
 
-  int prev_delay = -1;
   int i = 0;
   fseek(fd_nearend, i * FRAME_SAMPS * 2, SEEK_SET);
-  for (; i < MAX_DELAY; ++i)
+  for (; i < MAX_DELAY + delayEst->get_far_offset() / FRAME_SAMPS + NEAREND_SIZE; ++i)
   {
     fread(near, 2, FRAME_SAMPS, fd_nearend);
     float quality = 0;
-    int d = delayEst->process_near(near, &quality);
+    int d = delayEst->process_near(near, FRAME_SAMPS, &quality);
     if (d >= 0) {
-      if (d == prev_delay) // TODO 丢弃开头的无效数据
         break;
-      else
-        prev_delay = d;
     }
   }
 
