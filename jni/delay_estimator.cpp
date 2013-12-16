@@ -47,6 +47,7 @@ void delay_estimator::echo_cancel(short *in, short *ref, int samps,
   int n = samps;
   while (n >= FRAME_SAMPS) {
     speex_echo_cancellation(st, p1, p2, p3);
+    ++comp_times;
     p1 += FRAME_SAMPS;
     p2 += FRAME_SAMPS;
     p3 += FRAME_SAMPS;
@@ -101,15 +102,15 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
   if (best_delay >= 0) {
     if (quality) *quality = 1 / best_ratio;
     pos = best_delay * FRAME_SAMPS;
-    // reproduce
-    echo_cancel(needle, haystack + pos, needle_samps, out, NULL);
 #if 0
     __android_log_print(ANDROID_LOG_DEBUG, TAG,
         "best echo cancellation ratio at frame %d: %0.2f", best_delay, best_ratio);
 #endif
     
-    // dump
 #if 0
+    // reproduce
+    echo_cancel(needle, haystack + pos, needle_samps, out, NULL);
+    // dump
     char filename[128];
     sprintf(filename, "sdcard/tmp/out_%d_%0.2f.raw", best_delay, best_ratio);
     FILE *f = fopen(filename, "w+");
@@ -135,7 +136,7 @@ delay_estimator::delay_estimator(int sr, int frame_samps, int max_delay, int nea
   near_samps(0), near_offset(0),
   best_quality(0),
   best_delay(0),
-  search_times(0)
+  comp_times(0)
 {
   far = new short[MAX_FAR_SAMPS];
   near = new short[MAX_NEAR_SAMPS];
@@ -183,7 +184,6 @@ int delay_estimator::process_near(short *data, int n, float *quality_)
   int result = -1;
   {
     int d = search_audio(far, far_samps, near, near_samps, &quality);
-    ++search_times;
     result = (near_offset - far_offset) / FRAME_SAMPS - d;
     if (d >= 0 && result >= 0) {
       if (quality_) *quality_ = quality;
@@ -193,8 +193,8 @@ int delay_estimator::process_near(short *data, int n, float *quality_)
       if (++delay_score[result] > 2 && (result == best_delay || quality > best_quality)) {
         best_quality = quality;
         best_delay = result;
-        __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay, the final result: %d, %0.2f, hit times: %d, search times: %d",
-            result, quality, delay_score[result], search_times);
+        __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay, the final result: %d, %0.2f, hit times: %d, compare times: %d",
+            result, quality, delay_score[result], comp_times);
       } else {
         result = -1;
       }

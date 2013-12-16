@@ -392,6 +392,7 @@ void estimate_delay()
   fread(far, 2, MAX_DELAY * FRAME_SAMPS, fd_farend);
   //delayEst->add_far(far, MAX_DELAY * FRAME_SAMPS);
 
+  int64_t t0 = timestamp(0);
   int i = 0;
   fseek(fd_nearend, i * FRAME_SAMPS * 2, SEEK_SET);
   for (; i < MAX_DELAY + delayEst->get_far_offset() / FRAME_SAMPS + NEAREND_SIZE; ++i)
@@ -403,7 +404,7 @@ void estimate_delay()
         break;
     }
   }
-
+  __android_log_print(ANDROID_LOG_DEBUG, TAG, "elapse %dms", (int)timestamp(t0));
 
   close_dump_files();
   if (delayEst) {
