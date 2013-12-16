@@ -10,14 +10,13 @@
 #include <math.h>
 #include <unistd.h>
 
-#define TAG "aec" // log tag
+#define TAG "aec_est" // log tag
 
 bool silent(short *data, int samps)
 {
-  // TODO is this method reliable enough?
   int n0 = 0;
   for (int i = 0; i < samps; ++i) {
-    if (abs(data[i]) < 150)
+    if (abs(data[i]) < 250/* TODO is this method reliable enough?*/)
       ++n0;
   }
   return n0 * 100 / samps > 90;
@@ -167,7 +166,7 @@ int delay_estimator::add_far(short *data, int n)
   return n;
 }
 
-int delay_estimator::process_near(short *data, int n, float *quality_)
+int delay_estimator::process_near(short *data, int n, int hint, float *quality_)
 {
   // push new frame to |near|
   if (near_samps + n > MAX_NEAR_SAMPS) {
@@ -188,12 +187,15 @@ int delay_estimator::process_near(short *data, int n, float *quality_)
   {
     int d = -1;
 
-    if (last_delay <= 0) {
+    // use |last_delay| as search hint for better efficiency
+    if (hint <= 0)
+      hint = last_delay;
+
+    if (hint <= 0) {
       // search from the begining of |far| buffer
       d = search_audio(far, far_samps, near, near_samps, &quality);
     } else {
-      // use |last_delay| as search hint for better efficiency
-      int k = last_delay >= 2 ? last_delay - 2 : last_delay;
+      int k = hint >= 2 ? hint - 2 : hint;
       d = search_audio(far + k * FRAME_SAMPS, far_samps - k * FRAME_SAMPS, near, near_samps, &quality);
       if (d >= 0) {
         d += k;

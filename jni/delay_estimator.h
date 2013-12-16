@@ -30,8 +30,9 @@ class delay_estimator {
   delay_estimator(int sr, int frame_samps, int max_delay, int nearend_frames);
   ~delay_estimator();
   int add_far(short *data, int samps);
+  // hint - if >= 0, used as search hint
   // quality - output, can be NULL
-  int process_near(short *data, int samps, float *quality);
+  int process_near(short *data, int samps, int hint, float *quality);
 
   int get_far_offset() { return far_offset; }
   int get_near_offset() { return near_offset; }

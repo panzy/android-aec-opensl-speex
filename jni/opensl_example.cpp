@@ -397,7 +397,7 @@ void estimate_delay()
 
     fread(near, 2, FRAME_SAMPS, fd_nearend);
     float quality = 0;
-    int d = delayEst->process_near(near, FRAME_SAMPS, &quality);
+    int d = delayEst->process_near(near, FRAME_SAMPS, 12, &quality);
     if (d >= 0) {
         break;
     }
