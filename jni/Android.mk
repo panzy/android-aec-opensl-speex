@@ -16,7 +16,7 @@ LOCAL_MODULE   := opensl_example
 LOCAL_C_INCLUDES := $(LOCAL_PATH) \
 	/home/panzy/workspace/webrtc \
 	/home/panzy/workspace/speex-1.2rc1/include
-LOCAL_CFLAGS := -O3 
+LOCAL_CFLAGS := -O3
 LOCAL_CPPFLAGS :=$(LOCAL_CFLAGS)
 ###
 

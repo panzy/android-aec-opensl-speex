@@ -2,7 +2,6 @@
 */
 
 #include <jni.h>
-#include <android/log.h>
 #include <sys/time.h>
 #include <queue>
 #include <stdio.h>
@@ -17,6 +16,7 @@
 #include "speex/speex_preprocess.h"
 
 #include "opensl_example.h"
+#include "common.h"
 #include "delay_estimator.h"
 
 // from <inttypes.h>
@@ -214,13 +214,11 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
   // 间的逻辑，这里也强制 in_buffer_cnt 不小于一个阈值。
   if (in_buffer_cnt < min_buffer_cnt) in_buffer_cnt = min_buffer_cnt;
 
-  __android_log_print(ANDROID_LOG_DEBUG, TAG,
-          "AudioRecord min buf size %dB, AudioTrack min buf size %dB",
-          record_min_buf_size, track_min_buf_size);
-  __android_log_print(ANDROID_LOG_DEBUG, TAG,
-          "OpenSL audio in-buffer samps %dx%d, out-buffer samps %dx%d, echo delay %d(x%d=%dms)",
-          FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt,
-          echo_delay, FRAME_MS, echo_delay * FRAME_MS);
+  D("AudioRecord min buf size %dB, AudioTrack min buf size %dB",
+      record_min_buf_size, track_min_buf_size);
+  D("OpenSL audio in-buffer samps %dx%d, out-buffer samps %dx%d, echo delay %d(x%d=%dms)",
+      FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt,
+      echo_delay, FRAME_MS, echo_delay * FRAME_MS);
 
   p = android_OpenAudioDevice(SR, 1, 1, FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt);
   if(p == NULL) return; 
@@ -237,7 +235,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
   on = 1;
   t_start = timestamp(0);
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
-  __android_log_print(ANDROID_LOG_DEBUG, TAG, "start at %" PRId64 "ms" , t_start); 
+  D("start at %" PRId64 "ms" , t_start); 
 
 }
 
@@ -278,8 +276,7 @@ void runNearendProcessing()
   // ……不管怎样，下面的硬编码的值的实际效果更好
   max_ahead = 3 * FRAME_MS;
   min_ahead = 1 * FRAME_MS;
-  __android_log_print(ANDROID_LOG_DEBUG, TAG,
-      "main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
+  D("main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
       min_ahead, max_ahead, min_ahead / FRAME_MS, max_ahead / FRAME_MS);
   while(on) {
     t1 = timestamp(0);
@@ -299,7 +296,7 @@ void runNearendProcessing()
       // |playback_delay| 可以显著减少这种情况的发生
       int lack_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - rendered_samps;
       if (lack_samps > 0) {
-        __android_log_print(ANDROID_LOG_DEBUG, TAG, "playback underrun, lack of %d samps", lack_samps);
+        D("playback underrun, lack of %d samps", lack_samps);
         align_farend_buf(lack_samps);
         rendered_samps += lack_samps;
       }
@@ -309,7 +306,7 @@ void runNearendProcessing()
     int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
     if (samps == FRAME_SAMPS) {
       if (captured_samps == 0) 
-        __android_log_print(ANDROID_LOG_DEBUG, TAG, "first time of capture at @%"PRId64"ms", timestamp(t0));
+        D("first time of capture at @%"PRId64"ms", timestamp(t0));
       captured_samps += samps;
 
       dump_audio(inbuffer, fd_nearend, samps);
@@ -329,7 +326,7 @@ void runNearendProcessing()
       dump_audio(out, fd_send, samps);
       dump_audio(refbuf, fd_echo, samps);
     } else {
-      __android_log_print(ANDROID_LOG_DEBUG, TAG, "record nothing at @%"PRId64"ms", timestamp(t0));
+      D("record nothing at @%"PRId64"ms", timestamp(t0));
     }
 
     //
@@ -339,16 +336,16 @@ void runNearendProcessing()
     if (0) {
       int64_t curr_ahead = FRAME_MS - timestamp(t1);
       if (curr_ahead > 0) {
-        __android_log_print(ANDROID_LOG_DEBUG, TAG, "idle: %"PRId64"ms", curr_ahead);
+        D("idle: %"PRId64"ms", curr_ahead);
       } else {
-        __android_log_print(ANDROID_LOG_DEBUG, TAG, "idle: overrun for %"PRId64"ms!", -curr_ahead);
+        D("idle: overrun for %"PRId64"ms!", -curr_ahead);
       }
     }
     // balance total idle
     total_ahead = (loop_idx * FRAME_MS) - timestamp(t0);
     if (total_ahead > max_ahead) {
       total_ahead = total_ahead - min_ahead;
-      //__android_log_print(ANDROID_LOG_DEBUG, TAG, "idle: sleep %"PRId64"ms", total_ahead);
+      //D("idle: sleep %"PRId64"ms", total_ahead);
       usleep(1000 * total_ahead);
     }
   }
@@ -383,26 +380,44 @@ void estimate_delay()
 
   open_dump_files("r");
   if (!fd_farend || !fd_echo || !fd_nearend) {
-      __android_log_print(ANDROID_LOG_ERROR, TAG, "failed to open dump files at %d", __LINE__ );
+      E("failed to open dump files at %d", __LINE__ );
       return;
   }
 
   int64_t t0 = timestamp(0);
   int i = 0;
+  int result = -1;
   fseek(fd_nearend, i * FRAME_SAMPS * 2, SEEK_SET);
-  for (; i < MAX_DELAY * 2; ++i)
+  for (; /*i < MAX_DELAY * 40*/; ++i)
   {
-    fread(far, 2, FRAME_SAMPS, fd_farend);
+    if(FRAME_SAMPS != fread(far, 2, FRAME_SAMPS, fd_farend))
+      break;
     delayEst->add_far(far, FRAME_SAMPS);
 
     fread(near, 2, FRAME_SAMPS, fd_nearend);
-    float quality = 0;
-    int d = delayEst->process_near(near, FRAME_SAMPS, 12, &quality);
-    if (d >= 0) {
-        break;
+
+    delayEst->add_near(near, FRAME_SAMPS);
+
+#if 0
+    // sync call
+    result = delayEst->process(12);
+#else
+    // async call
+    if (delayEst->get_near_offset() > 0) {
+      delayEst->process_async(12);
+      usleep(100 * 1000); // TODO need to fix
+    } else {
+      D("near offset %d", delayEst->get_near_offset());
+    }
+#endif
+
+    usleep(FRAME_MS * 1000);
+
+    if (result >= 0 || (result = delayEst->async_result) >= 0) {
+      I("delay esitmation done, result %d, elapse %dms", result, (int)timestamp(t0));
+      break;
     }
   }
-  __android_log_print(ANDROID_LOG_DEBUG, TAG, "elapse %dms", (int)timestamp(t0));
 
   close_dump_files();
   if (delayEst) {
