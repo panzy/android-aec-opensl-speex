@@ -41,7 +41,9 @@ void delay_estimator::speex_ec_close ()
 void delay_estimator::echo_cancel(short *in, short *ref, int samps,
         short *out, float *cancellation_ratio)
 {
-  speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 2);
+  // 由于我们要查找的delay是精确到单个frame的，speex 的 filter length 为 1xframe
+  // 即可（1xframe 比 2xframe 快大约 20%）
+  speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 1);
 
   short *p1 = in, *p2 = ref, *p3 = out;
   int n = samps;
