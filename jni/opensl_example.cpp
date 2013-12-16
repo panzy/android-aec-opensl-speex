@@ -390,7 +390,7 @@ void estimate_delay()
   fread(far, 2, MAX_DELAY * FRAME_SAMPS, fd_farend);
   delayEst->add_far(far, MAX_DELAY * FRAME_SAMPS);
   fread(far, 2, MAX_DELAY * FRAME_SAMPS, fd_farend);
-  delayEst->add_far(far, MAX_DELAY * FRAME_SAMPS);
+  //delayEst->add_far(far, MAX_DELAY * FRAME_SAMPS);
 
   int i = 0;
   fseek(fd_nearend, i * FRAME_SAMPS * 2, SEEK_SET);

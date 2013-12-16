@@ -12,13 +12,14 @@ class delay_estimator {
   int MAX_NEAR_SAMPS; // size of search target
   short *far;
   short *near;
-  char *delay_score; // [delay] => score
+  char *delay_score; // [delay] => hit_times
   int far_samps;
   int far_offset; // count of passed samples in |far| buffer
   int near_samps; // count of samps in |near| buffer
   int near_offset; // count of passed samples in |near| buffer
   float best_quality;
   int best_delay;
+  int search_times;
   SpeexEchoState *st;
 
   public:
