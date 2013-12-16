@@ -19,6 +19,7 @@ class delay_estimator {
   int near_offset; // count of passed samples in |near| buffer
   float best_quality;
   int best_delay;
+  int last_delay;
   int comp_times;
   SpeexEchoState *st;
 

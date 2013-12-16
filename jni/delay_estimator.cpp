@@ -136,6 +136,7 @@ delay_estimator::delay_estimator(int sr, int frame_samps, int max_delay, int nea
   near_samps(0), near_offset(0),
   best_quality(0),
   best_delay(0),
+  last_delay(0),
   comp_times(0)
 {
   far = new short[MAX_FAR_SAMPS];
@@ -183,14 +184,29 @@ int delay_estimator::process_near(short *data, int n, float *quality_)
   float quality = 0;
   int result = -1;
   {
-    int d = search_audio(far, far_samps, near, near_samps, &quality);
-    result = (near_offset - far_offset) / FRAME_SAMPS - d;
+    int d = -1;
+
+    if (last_delay <= 0) {
+      // search from the begining of |far| buffer
+      d = search_audio(far, far_samps, near, near_samps, &quality);
+    } else {
+      // use |last_delay| as search hint for better efficiency
+      int k = last_delay >= 2 ? last_delay - 2 : last_delay;
+      d = search_audio(far + k * FRAME_SAMPS, far_samps - k * FRAME_SAMPS, near, near_samps, &quality);
+      if (d >= 0) {
+        d += k;
+      } else {
+        d = search_audio(far, far_samps - k * FRAME_SAMPS, near, near_samps, &quality);
+      }
+    }
+
+    result = last_delay = (near_offset - far_offset) / FRAME_SAMPS - d;
     if (d >= 0 && result >= 0) {
       if (quality_) *quality_ = quality;
       __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay: (%d~%d,%d+%d)=>%d, %0.2f",
           near_offset / FRAME_SAMPS, (near_offset + near_samps) / FRAME_SAMPS,
           far_offset / FRAME_SAMPS, d, result, quality);
-      if (++delay_score[result] > 2 && (result == best_delay || quality > best_quality)) {
+      if (++delay_score[result] > 1 && (result == best_delay || quality > best_quality)) {
         best_quality = quality;
         best_delay = result;
         __android_log_print(ANDROID_LOG_DEBUG, TAG, "estimated delay, the final result: %d, %0.2f, hit times: %d, compare times: %d",
