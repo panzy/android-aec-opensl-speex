@@ -282,16 +282,16 @@ SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_pull(JNIEnv *jen
 }
 
 
-SWIGEXPORT jlong JNICALL Java_opensl_1example_opensl_1exampleJNI_estimate_1delay(JNIEnv *jenv, jclass jcls, jint jarg1) {
-  jlong jresult = 0 ;
+SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_estimate_1delay(JNIEnv *jenv, jclass jcls, jint jarg1) {
+  jint jresult = 0 ;
   int arg1 ;
-  void *result = 0 ;
+  int result;
   
   (void)jenv;
   (void)jcls;
   arg1 = (int)jarg1; 
-  result = (void *)estimate_delay(arg1);
-  *(void **)&jresult = result; 
+  result = (int)estimate_delay(arg1);
+  jresult = (jint)result; 
   return jresult;
 }
 

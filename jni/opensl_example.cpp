@@ -398,7 +398,7 @@ void cleanup()
   }
 }
 
-void *estimate_delay(int async)
+int estimate_delay(int async)
 {
   const int MAX_DELAY = 50;
   const int NEAREND_SIZE = 10;
