@@ -60,10 +60,8 @@ const int NEAREND_SIZE = 10;
 
 //--------------------------------------------------------------------------------
 
-void delay_estimator_destroy();
 void cleanup();
 void dump_audio_(short *frame, FILE *fd, int samps);
-void estimate_delay();
 void speex_ec_open (int sampleRate, int bufsize, int totalSize);
 void speex_ec_close ();
 int playback(short *_farend, int samps, bool with_aec_analyze);
@@ -75,6 +73,8 @@ SpeexEchoState *st = NULL;
 SpeexPreprocessState *den = NULL;
 
 delay_estimator *delayEst = NULL;
+pthread_t delay_est_thrd;
+bool delay_est_thrd_stopped;
 
 static int on;
 OPENSL_STREAM  *p = NULL;
@@ -175,8 +175,6 @@ void close_dump_files()
 
 void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_delay_ms)
 {
-  echo_delay2 = -1; // 每次都重新评估
-
   playback_delay = playback_delay_ms / FRAME_MS;
 
   //
@@ -239,9 +237,11 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
 #endif
   on = 1;
   t_start = timestamp(0);
+  echo_delay2 = -1; // 每次都重新评估
+  delay_est_thrd_stopped = true;
+
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
   D("start at %" PRId64 "ms" , t_start); 
-
 }
 
 void runNearendProcessing() 
@@ -250,9 +250,9 @@ void runNearendProcessing()
   short refbuf[FRAME_SAMPS];
   short processedbuffer[FRAME_SAMPS];
 
-  if (echo_delay2 < 0 && !delayEst) {
-    delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
-  }
+  //if (echo_delay2 < 0 && !delayEst) {
+  //  delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
+  //}
 
   // delay echo_buf (relative to farend_buf)
   for (int i = 0; i < echo_delay; ++i)
@@ -291,6 +291,25 @@ void runNearendProcessing()
     t1 = timestamp(0);
     ++loop_idx;
 
+    // estimate echo delay
+<<<<<<< HEAD
+    if (echo_delay2 < 0 && loop_idx > playback_delay + MAX_DELAY * 5) {
+=======
+    if (echo_delay2 < 0 && loop_idx > playback_delay + 50) {
+>>>>>>> d8e73d5d31568343fa35a384ce002334007dfb38
+      if (delay_est_thrd_stopped) {
+        D("start estimate_delay ");
+        close_dump_files(); // XXX 否则 estimate_delay() 会阻塞在 fopen() 上。 
+        delay_est_thrd_stopped = false;
+        pthread_create(&delay_est_thrd, NULL, (void* (*)(void*))estimate_delay, 0);
+      }
+
+      //if (delayEst->succ_times > 2) {
+      //  echo_delay2 = delayEst->get_best_delay();
+      //  D("got echo_delay2 %d", echo_delay2);
+      //}
+    }
+
     // playback
     if (loop_idx < playback_delay) {
       playback(silence, FRAME_SAMPS, true /* XXX test false */);
@@ -313,20 +332,6 @@ void runNearendProcessing()
 
     // record
     int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
-
-    // estimate delay
-    if (samps > 0 && echo_delay2 < 0) {
-      delayEst->add_near(inbuffer, samps);
-      if (delayEst->get_near_samps() > NEAREND_SIZE + playback_delay * FRAME_SAMPS) {
-        delayEst->process_async(echo_delay);
-      }
-      if (delayEst->succ_times > 0) {
-        echo_delay2 = delayEst->get_best_delay();
-        D("got echo_delay2: %d", echo_delay2);
-        // TODO free delayEst safely
-      }
-    }
-
     if (samps == FRAME_SAMPS) {
       if (captured_samps == 0) 
         D("first time of capture at @%"PRId64"ms", timestamp(t0));
@@ -398,58 +403,74 @@ void cleanup()
   }
 }
 
-void estimate_delay()
+<<<<<<< HEAD
+int estimate_delay(int async)
+=======
+void *estimate_delay(int async)
+>>>>>>> d8e73d5d31568343fa35a384ce002334007dfb38
 {
   short far[MAX_DELAY * FRAME_SAMPS];
   short near[FRAME_SAMPS];
   delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
 
-  open_dump_files("r");
-  if (!fd_farend || !fd_echo || !fd_nearend) {
+  FILE *fd_f = fopen("/mnt/sdcard/tmp/far.raw", "r");
+  FILE *fd_n = fopen("/mnt/sdcard/tmp/near.raw", "r");
+  if (!fd_f || !fd_n) {
       E("failed to open dump files at %d", __LINE__ );
-      return;
+<<<<<<< HEAD
+      return 0;
+=======
+      return NULL;
+>>>>>>> d8e73d5d31568343fa35a384ce002334007dfb38
   }
 
   int64_t t0 = timestamp(0);
   int i = 0;
   int result = -1;
-  fseek(fd_nearend, i * FRAME_SAMPS * 2, SEEK_SET);
+  fseek(fd_n, i * FRAME_SAMPS * 2, SEEK_SET);
   for (; /*i < MAX_DELAY * 40*/; ++i)
   {
-    if(FRAME_SAMPS != fread(far, 2, FRAME_SAMPS, fd_farend))
+    if(FRAME_SAMPS != fread(far, 2, FRAME_SAMPS, fd_f))
       break;
     delayEst->add_far(far, FRAME_SAMPS);
 
-    fread(near, 2, FRAME_SAMPS, fd_nearend);
+    fread(near, 2, FRAME_SAMPS, fd_n);
 
     delayEst->add_near(near, FRAME_SAMPS);
 
-#if 1
-    // sync call
-    result = delayEst->process(12);
-#else
-    // async call
-    if (delayEst->get_near_samps() > NEAREND_SIZE) {
-      delayEst->process_async(12);
-      //usleep(100 * 1000); // TODO need to fix
+    if (!async) {
+      // sync call
+      result = delayEst->process(12);
     } else {
-      D("near samps %d", delayEst->get_near_samps());
+      // async call
+      if (delayEst->get_near_samps() > NEAREND_SIZE) {
+        delayEst->process_async(12);
+        //usleep(100 * 1000); // TODO need to fix
+      } else {
+        D("near samps %d", delayEst->get_near_samps());
+      }
     }
-#endif
 
     usleep(FRAME_MS * 1000);
 
-    if ((result >= 0 || (result = delayEst->get_best_delay()) >= 0) && delayEst->succ_times > 2) {
+    if ((result >= 0 || (result = delayEst->get_best_delay()) >= 0) && delayEst->succ_times > 1) {
       I("delay esitmation done, result %d, elapse %dms", result, (int)timestamp(t0));
       break;
     }
   }
 
-  close_dump_files();
+  fclose(fd_f);
+  fclose(fd_n);
   if (delayEst) {
     delete delayEst;
     delayEst = NULL;
   }
+
+<<<<<<< HEAD
+  return 0;
+=======
+  return NULL;
+>>>>>>> d8e73d5d31568343fa35a384ce002334007dfb38
 }
 
 int pull(JNIEnv *env, jshortArray buf)
@@ -478,9 +499,9 @@ int playback(short *_farend, int samps, bool with_aec_analyze)
   // analyze
   if (with_aec_analyze) {
     write_circular_buffer(echo_buf, _farend, samps);
-    if (delayEst) {
-      delayEst->add_far(_farend, samps);
-    }
+    //if (delayEst) {
+    //  delayEst->add_far(_farend, samps);
+    //}
   }
 
   // render

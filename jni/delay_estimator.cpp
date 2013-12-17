@@ -26,7 +26,7 @@ bool delay_estimator::silent(short *data, int samps)
 {
   int n0 = 0;
   for (int i = 0; i < samps; ++i) {
-    if (abs(data[i]) < 1000 /* TODO is this method reliable enough?*/)
+    if (abs(data[i]) < 2000 /* TODO is this method reliable enough?*/)
       ++n0;
   }
   return n0 * 100 / samps > 95;
@@ -219,6 +219,18 @@ void *process_proc(void *me)
 {
   delay_estimator *p = (delay_estimator*)me;
   p->process(p->async_hint);
+}
+
+int delay_estimator::is_processing()
+{
+  pthread_mutex_lock(&process_lock);
+  if (processing) {
+    pthread_mutex_unlock(&process_lock);
+    return true;
+  } else {
+    pthread_mutex_unlock(&process_lock);
+    return false;
+  }
 }
 
 bool delay_estimator::process_async(int hint)
