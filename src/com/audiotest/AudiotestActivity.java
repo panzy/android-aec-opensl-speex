@@ -165,7 +165,7 @@ public class AudiotestActivity extends Activity {
             }
         };
 
-        if (true) {
+        if (false) {
             opensl_example.start(track_minbufsz, record_minbufsz, playback_delay);
             thread.start();
             thread2.start();

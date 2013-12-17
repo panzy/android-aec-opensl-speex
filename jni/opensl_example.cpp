@@ -35,6 +35,9 @@
 #define WEBRTC_SPECTRUM_MS (WEBRTC_SPECTRUM_SIZE * FRAME_MS / FRAME_SAMPS)
 #define WEBRTC_HISTORY_SIZE ((1500 / 1000) * SR * SAMPLE_SIZE)
 
+const int MAX_DELAY = 50;
+const int NEAREND_SIZE = 10;
+
 // 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
 // 供稳定的音频流。
 // 这个缓冲区对 echo delay 不会产生影响。
@@ -243,8 +246,6 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
 
 void runNearendProcessing() 
 {
-  const int MAX_DELAY = 50;
-  const int NEAREND_SIZE = 10;
   short inbuffer[FRAME_SAMPS]; // record
   short refbuf[FRAME_SAMPS];
   short processedbuffer[FRAME_SAMPS];
@@ -319,7 +320,7 @@ void runNearendProcessing()
       if (delayEst->get_near_samps() > NEAREND_SIZE + playback_delay * FRAME_SAMPS) {
         delayEst->process_async(echo_delay);
       }
-      if (delayEst->succ_times > 2) {
+      if (delayEst->succ_times > 0) {
         echo_delay2 = delayEst->get_best_delay();
         D("got echo_delay2: %d", echo_delay2);
         // TODO free delayEst safely
@@ -399,8 +400,6 @@ void cleanup()
 
 void estimate_delay()
 {
-  const int MAX_DELAY = 50;
-  const int NEAREND_SIZE = 10;
   short far[MAX_DELAY * FRAME_SAMPS];
   short near[FRAME_SAMPS];
   delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
@@ -425,7 +424,7 @@ void estimate_delay()
 
     delayEst->add_near(near, FRAME_SAMPS);
 
-#if 0
+#if 1
     // sync call
     result = delayEst->process(12);
 #else
