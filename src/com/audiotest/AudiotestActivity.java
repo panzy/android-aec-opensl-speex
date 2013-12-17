@@ -171,7 +171,7 @@ public class AudiotestActivity extends Activity {
             thread2.start();
             //thread3.start();
         } else {
-            opensl_example.estimate_delay();
+            opensl_example.estimate_delay(0);
         }
 
         checkAudioLowLatencyFeature();

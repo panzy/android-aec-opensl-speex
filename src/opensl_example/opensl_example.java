@@ -29,8 +29,9 @@ public class opensl_example {
     return opensl_exampleJNI.pull(buf);
   }
 
-  public static void estimate_delay() {
-    opensl_exampleJNI.estimate_delay();
+  public static SWIGTYPE_p_void estimate_delay(int async) {
+    long cPtr = opensl_exampleJNI.estimate_delay(async);
+    return (cPtr == 0) ? null : new SWIGTYPE_p_void(cPtr, false);
   }
 
   public static double getTimestamp() {

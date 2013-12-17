@@ -217,6 +217,18 @@ void *process_proc(void *me)
   p->process(p->async_hint);
 }
 
+int delay_estimator::is_processing()
+{
+  pthread_mutex_lock(&process_lock);
+  if (processing) {
+    pthread_mutex_unlock(&process_lock);
+    return true;
+  } else {
+    pthread_mutex_unlock(&process_lock);
+    return false;
+  }
+}
+
 bool delay_estimator::process_async(int hint)
 {
   if (0 != pthread_mutex_trylock(&process_lock))

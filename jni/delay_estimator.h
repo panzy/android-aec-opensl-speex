@@ -1,3 +1,6 @@
+#ifndef _DELAY_ESTIMATOR_H_
+#define _DELAY_ESTIMATOR_H_
+
 /* delay_estimator
  *
  * 用迭代调用 speex 回声消除的方法在预设范围内搜索回声延迟的值。
@@ -49,6 +52,7 @@ class delay_estimator {
   int get_best_quality() { return best_delay >= 0 ? delay_quality[best_delay] : 0; }
   int get_far_samps() { return total_far_samps; }
   int get_near_samps() { return total_near_samps; }
+  int is_processing();
 
   //------------------------------------------------------------
   private:
@@ -66,3 +70,4 @@ class delay_estimator {
   static int array_push(short *dst, int dst_len, int dst_capacity, short *src, int n);
 };
 
+#endif
