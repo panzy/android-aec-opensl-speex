@@ -60,9 +60,5 @@ int push(JNIEnv *env, jshortArray buf);
  * buf: a frame of samples.
  * return: 0 or buf.len */
 int pull(JNIEnv *env, jshortArray buf);
-<<<<<<< HEAD
 int estimate_delay(int async);
-=======
-void *estimate_delay(int async);
->>>>>>> d8e73d5d31568343fa35a384ce002334007dfb38
 double getTimestamp();

@@ -26,10 +26,6 @@ public class opensl_exampleJNI {
   public final static native void stop();
   public final static native int push(short[] jarg2);
   public final static native int pull(short[] jarg2);
-<<<<<<< HEAD
   public final static native int estimate_delay(int jarg1);
-=======
-  public final static native long estimate_delay(int jarg1);
->>>>>>> d8e73d5d31568343fa35a384ce002334007dfb38
   public final static native double getTimestamp();
 }

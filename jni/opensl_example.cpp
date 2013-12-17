@@ -292,11 +292,7 @@ void runNearendProcessing()
     ++loop_idx;
 
     // estimate echo delay
-<<<<<<< HEAD
     if (echo_delay2 < 0 && loop_idx > playback_delay + MAX_DELAY * 5) {
-=======
-    if (echo_delay2 < 0 && loop_idx > playback_delay + 50) {
->>>>>>> d8e73d5d31568343fa35a384ce002334007dfb38
       if (delay_est_thrd_stopped) {
         D("start estimate_delay ");
         close_dump_files(); // XXX 否则 estimate_delay() 会阻塞在 fopen() 上。 
@@ -403,11 +399,7 @@ void cleanup()
   }
 }
 
-<<<<<<< HEAD
 int estimate_delay(int async)
-=======
-void *estimate_delay(int async)
->>>>>>> d8e73d5d31568343fa35a384ce002334007dfb38
 {
   short far[MAX_DELAY * FRAME_SAMPS];
   short near[FRAME_SAMPS];
@@ -417,11 +409,7 @@ void *estimate_delay(int async)
   FILE *fd_n = fopen("/mnt/sdcard/tmp/near.raw", "r");
   if (!fd_f || !fd_n) {
       E("failed to open dump files at %d", __LINE__ );
-<<<<<<< HEAD
       return 0;
-=======
-      return NULL;
->>>>>>> d8e73d5d31568343fa35a384ce002334007dfb38
   }
 
   int64_t t0 = timestamp(0);
@@ -466,11 +454,7 @@ void *estimate_delay(int async)
     delayEst = NULL;
   }
 
-<<<<<<< HEAD
   return 0;
-=======
-  return NULL;
->>>>>>> d8e73d5d31568343fa35a384ce002334007dfb38
 }
 
 int pull(JNIEnv *env, jshortArray buf)
