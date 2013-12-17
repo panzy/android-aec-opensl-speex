@@ -442,10 +442,11 @@ int estimate_delay(int async)
     usleep(FRAME_MS * 1000);
 
     if ((result >= 0 || (result = delayEst->get_best_delay()) >= 0) && delayEst->succ_times > 1) {
-      I("delay esitmation done, result %d, elapse %dms", result, (int)timestamp(t0));
       break;
     }
   }
+
+  I("delay esitmation done, result %d, elapse %dms", result, (int)timestamp(t0));
 
   fclose(fd_f);
   fclose(fd_n);
