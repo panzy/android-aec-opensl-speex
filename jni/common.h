@@ -2,6 +2,7 @@
 #define _COMMON_H_
 
 #include <android/log.h>
+#include <bits/stl_algobase.h>
 
 #define I(fmt, ...)  __android_log_print(ANDROID_LOG_INFO, TAG, fmt, ##__VA_ARGS__);
 

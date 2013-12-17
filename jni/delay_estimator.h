@@ -5,21 +5,20 @@
 //#include "<pthread.h>" // not found
 #include "/opt/android-ndk-r9b/platforms/android-9/arch-arm/usr/include/pthread.h"
 #include "speex/speex_echo.h"
+#include "opensl_io2.h" // circular buffer
 
 class delay_estimator {
   int SR;
   int FRAME_SAMPS;
   int MAX_DELAY;
-  int MAX_FAR_SAMPS, MAX_FAR2_SAMPS; // search scope in farend
-  int MAX_NEAR_SAMPS, MAX_NEAR2_SAMPS; // size of search target
-  short *far, *far2; // far2 is for relay
-  short *near, *near2;
-  int far_samps, far2_samps;
-  int far_offset; // count of passed samples in |far| buffer
-  int near_samps, near2_samps; // count of samps in |near| buffer
-  int near_offset; // count of passed samples in |near| buffer
-  char *delay_score; // [delay] => hit_times
-  float best_quality;
+  int MAX_FAR_SAMPS; // search scope in farend
+  int MAX_NEAR_SAMPS; // size of search target
+  short *farbuf;
+  short *nearbuf;
+  int total_far_samps;
+  int total_near_samps;
+  char *delay_hits; // [delay] => hit_times
+  float *delay_quality; // [delay] => quality
   int best_delay;
   int last_delay;
   int comp_times;
@@ -31,6 +30,7 @@ class delay_estimator {
   public:
   int async_hint; // hint param of process_async method.
   int async_result;
+  int succ_times; // success times of processing
 
   //------------------------------------------------------------
   public:
@@ -45,8 +45,8 @@ class delay_estimator {
   int process(int hint);
   bool process_async(int hint);
 
-  int get_far_offset() { return far_offset; }
-  int get_near_offset() { return near_offset; }
+  int get_far_samps() { return total_far_samps; }
+  int get_near_samps() { return total_near_samps; }
 
   //------------------------------------------------------------
   private:
@@ -61,6 +61,6 @@ class delay_estimator {
 
   // treat |dst| array as a FIFO queue.
   // return shorts been pushed |n|.
-  static int array_push(short *dst, int dst_len, int dst_capacity, short *src, int n, int *dst_offset);
+  static int array_push(short *dst, int dst_len, int dst_capacity, short *src, int n);
 };
 

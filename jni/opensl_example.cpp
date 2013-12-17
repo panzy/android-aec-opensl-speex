@@ -403,17 +403,17 @@ void estimate_delay()
     result = delayEst->process(12);
 #else
     // async call
-    if (delayEst->get_near_offset() > 0) {
+    if (delayEst->get_near_samps() > NEAREND_SIZE) {
       delayEst->process_async(12);
-      usleep(100 * 1000); // TODO need to fix
+      //usleep(100 * 1000); // TODO need to fix
     } else {
-      D("near offset %d", delayEst->get_near_offset());
+      D("near samps %d", delayEst->get_near_samps());
     }
 #endif
 
     usleep(FRAME_MS * 1000);
 
-    if (result >= 0 || (result = delayEst->async_result) >= 0) {
+      if ((result >= 0 || (result = delayEst->async_result) >= 0) && delayEst->succ_times > 2) {
       I("delay esitmation done, result %d, elapse %dms", result, (int)timestamp(t0));
       break;
     }

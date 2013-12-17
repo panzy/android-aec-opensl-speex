@@ -30,7 +30,7 @@ bool delay_estimator::silent(short *data, int samps)
   return n0 * 100 / samps > 90;
 }
 
-void delay_estimator::speex_ec_open (int sampleRate, int bufsize, int totalSize)
+void delay_estimator::speex_ec_open(int sampleRate, int bufsize, int totalSize)
 {
   //init
   st = speex_echo_state_init(bufsize, totalSize);
@@ -82,7 +82,7 @@ void delay_estimator::echo_cancel(short *in, short *ref, int samps,
 // return: count of |FRAME_SAMPS|
 int delay_estimator::search_audio(short *haystack, int haystack_samps, short *needle, int needle_samps, float *quality)
 {
-  D("search_audio, %d/%d", needle_samps, haystack_samps);
+  //D("search_audio, %d/%d", needle_samps, haystack_samps);
 
   if (silent(needle, needle_samps)) {
     D("ignore silent needle at frame");
@@ -96,7 +96,7 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
   while (pos < haystack_samps - needle_samps) {
     float ratio;
     echo_cancel(needle, haystack + pos, needle_samps, out, &ratio);
-#if 1
+#if 0
     D("echo cancellation ratio at frame %d: %0.2f", pos / FRAME_SAMPS, ratio);
 #endif
 
@@ -141,50 +141,46 @@ delay_estimator::delay_estimator(int sr, int frame_samps, int max_delay, int nea
   FRAME_SAMPS(frame_samps),
   MAX_DELAY(max_delay),
   MAX_FAR_SAMPS(FRAME_SAMPS * MAX_DELAY),
-  MAX_FAR2_SAMPS(MAX_FAR_SAMPS),
   MAX_NEAR_SAMPS(FRAME_SAMPS * nearend_frames),
-  MAX_NEAR2_SAMPS(MAX_FAR2_SAMPS),
-  far(NULL), far2(NULL),
-  near(NULL), near2(NULL),
-  far_samps(0), far2_samps(0), far_offset(0),
-  near_samps(0), near2_samps(0), near_offset(0),
-  best_quality(0),
-  best_delay(0),
+  total_far_samps(0),
+  total_near_samps(0),
+  best_delay(-1),
   last_delay(0),
   comp_times(0),
   processing(false),
   async_hint(0),
-  async_result(-1)
+  async_result(-1),
+  succ_times(0)
 {
-  far = new short[MAX_FAR_SAMPS];
-  near = new short[MAX_NEAR_SAMPS];
-  delay_score = new char[MAX_DELAY]; // [delay] => score
-  memset(delay_score, 0, MAX_DELAY * sizeof(delay_score[0]));
+  farbuf = new short[MAX_FAR_SAMPS];
+  nearbuf = new short[MAX_NEAR_SAMPS];
+  delay_hits = new char[MAX_DELAY]; // [delay] => hits
+  delay_quality = new float[MAX_DELAY];
+  memset(delay_hits, 0, MAX_DELAY * sizeof(delay_hits[0]));
+  memset(delay_quality, 0, MAX_DELAY * sizeof(delay_quality[0]));
   pthread_mutex_init(&process_lock, NULL);
 }
 
 delay_estimator::~delay_estimator()
 {
-  delete[] far;
-  delete[] near;
-  delete[] delay_score;
+  delete[] farbuf;
+  delete[] nearbuf;
+  delete[] delay_hits;
   pthread_join(process_thrd, NULL);
   pthread_mutex_destroy(&process_lock);
 }
 
 int delay_estimator::array_push(short *dst, int dst_len, int dst_capacity,
-    short *src, int n, int *dst_offset)
+    short *src, int n)
 {
   if (n >= dst_capacity) {
     memcpy(dst, src + n - dst_capacity, dst_capacity * 2);
-    n = dst_capacity;
   } else {
     // shift
     if (dst_len + n > dst_capacity) {
       int shift = dst_len + n - dst_capacity;
       memmove(dst, dst + shift, (dst_capacity - n) * 2);
       dst_len = dst_capacity - n;
-      *dst_offset += shift;
     }
     // push
     memcpy(dst + dst_len, src, n * 2);
@@ -196,24 +192,7 @@ int delay_estimator::add_far(short *data, int n)
 {
   pthread_mutex_lock(&process_lock);
 
-  if (processing) {
-    // push data to |far2| buffer
-    if (far2_samps + n > MAX_FAR2_SAMPS) {
-      n = MAX_FAR2_SAMPS - far2_samps;
-    }
-    memcpy(far2 + far2_samps, data, n * 2);
-    far2_samps += n;
-  } else {
-    // move data from |far2| buffer to |far|, if any
-    if (far2_samps > 0 && n < MAX_FAR_SAMPS) {
-      far_samps += array_push(far, far_samps, MAX_FAR_SAMPS, far2, far2_samps, &far_offset);
-    }
-    
-    // push |data| to |far| buffer
-    far_samps += array_push(far, far_samps, MAX_FAR_SAMPS, data, n, &far_offset);
-    if (far_samps > MAX_FAR_SAMPS)
-      far_samps = MAX_FAR_SAMPS;
-  }
+  total_far_samps += array_push(farbuf, total_far_samps % MAX_FAR_SAMPS, MAX_FAR_SAMPS, data, n);
 
   pthread_mutex_unlock(&process_lock);
 
@@ -224,24 +203,7 @@ int delay_estimator::add_near(short *data, int n)
 {
   pthread_mutex_lock(&process_lock);
 
-  if (processing) {
-    // push data to |near2| buffer
-    if (near2_samps + n > MAX_NEAR2_SAMPS) {
-      n = MAX_NEAR2_SAMPS - near2_samps;
-    }
-    memcpy(near2 + near2_samps, data, n * 2);
-    near2_samps += n;
-  } else {
-    // move data from |near2| buffer to |near|, if any
-    if (near2_samps > 0 && n < MAX_NEAR_SAMPS) {
-      near_samps += array_push(near, near_samps, MAX_NEAR_SAMPS, near2, near2_samps, &near_offset);
-    }
-    
-    // push |data| to |near| buffer
-    near_samps += array_push(near, near_samps, MAX_NEAR_SAMPS, data, n, &near_offset);
-    if (near_samps > MAX_NEAR_SAMPS)
-      near_samps = MAX_NEAR_SAMPS;
-  }
+  total_near_samps += array_push(nearbuf, total_near_samps % MAX_NEAR_SAMPS, MAX_NEAR_SAMPS, data, n); 
 
   pthread_mutex_unlock(&process_lock);
 
@@ -272,22 +234,40 @@ bool delay_estimator::process_async(int hint)
 
 int delay_estimator::process(int hint)
 {
-  // set |processing| as true
-  pthread_mutex_lock(&process_lock);
-  processing = true;
-  pthread_mutex_unlock(&process_lock);
-
+  short *far = NULL;
+  short *near = NULL;
+  int far_samps = 0; // samples in |far| array
   int result = -1;
   float quality = 0;
-
   int64_t t0 = timestamp(0);
 
-  if (near_samps < MAX_NEAR_SAMPS) {
-    D("nearend buffer not enough (%d/%d), return", near_samps, MAX_NEAR_SAMPS);
+  // set |processing| as true;
+  // take snapshot of farend and nearend buffer
+  pthread_mutex_lock(&process_lock);
+
+  if (total_near_samps < MAX_NEAR_SAMPS) {
+    D("nearend buffer not enough (%d/%d), return", total_near_samps, MAX_NEAR_SAMPS);
+    pthread_mutex_unlock(&process_lock);
     goto RETURN;
   }
 
+  processing = true;
+
+  far_samps = total_far_samps % MAX_FAR_SAMPS;
+  far = new short[far_samps];
+  near = new short[MAX_NEAR_SAMPS];
+  memcpy(far, farbuf, far_samps * 2);
+  memcpy(near, nearbuf, MAX_NEAR_SAMPS * 2);
+
+  pthread_mutex_unlock(&process_lock);
+
   {
+    int pos_far = total_far_samps < MAX_FAR_SAMPS ? 0 : total_far_samps - MAX_FAR_SAMPS;
+    int pos_near = total_near_samps - MAX_NEAR_SAMPS;
+    D("process: (%d~%d,%d~%d)",
+        pos_near / FRAME_SAMPS, total_near_samps / FRAME_SAMPS,
+        pos_far / FRAME_SAMPS, total_far_samps / FRAME_SAMPS);
+
     int d = -1;
 
     // use |last_delay| as search hint for better efficiency
@@ -295,50 +275,71 @@ int delay_estimator::process(int hint)
       hint = last_delay;
 
     // search the |k|-th frame of |far| buffer
-    int k = hint + (far_offset - near_offset) / FRAME_SAMPS;
+    int k = (total_near_samps - total_far_samps - MAX_NEAR_SAMPS + MAX_FAR_SAMPS) / FRAME_SAMPS - hint;
 
-    if (hint <= 0 || k <= 0 || far_samps - k * FRAME_SAMPS < near_samps) {
+    if (true /* TODO */ || hint <= 0 || k <= 0) {
       // search from the begining of |far| buffer
-      d = search_audio(far, far_samps, near, near_samps, &quality);
+      d = search_audio(far, far_samps, near, MAX_NEAR_SAMPS, &quality);
     } else {
-      d = search_audio(far + k * FRAME_SAMPS, far_samps - k * FRAME_SAMPS, near, near_samps, &quality);
+      d = search_audio(far + k * FRAME_SAMPS, far_samps - k * FRAME_SAMPS, near, MAX_NEAR_SAMPS, &quality);
       if (d >= 0) {
         d += k;
       } else {
-        d = search_audio(far, far_samps - k * FRAME_SAMPS, near, near_samps, &quality);
+        d = search_audio(far, far_samps - k * FRAME_SAMPS, near, MAX_NEAR_SAMPS, &quality);
       }
     }
 
-    result = (near_offset - far_offset) / FRAME_SAMPS - d;
-    if (d >= 0 && result >= 0) {
-      ++delay_score[result];
-      last_delay = result;
-      D("estimated delay: (%d~%d,%d+%d)=>%d, quality %0.2f, hit %d",
-          near_offset / FRAME_SAMPS, (near_offset + near_samps) / FRAME_SAMPS,
-          far_offset / FRAME_SAMPS, d, result, quality, delay_score[result]);
-      D("current best result: delay %d, quality %0.2f, hit %d",
-          best_delay, best_quality, delay_score[best_delay]);
-      if (delay_score[result] > 1 && (result == best_delay || quality > best_quality)) {
-        best_quality = quality;
-        best_delay = result;
-        D("estimated delay, the final result: %d, %0.2f, hit times: %d, compare times: %d",
-            result, quality, delay_score[result], comp_times);
-      } else {
-        result = -1;
+    if (d >= 0) {
+      result = (pos_near - (pos_far + d * FRAME_SAMPS)) / FRAME_SAMPS;
+
+      if (result >= 0) {
+
+        // record hits and quality
+        delay_hits[result] += 2;
+        if (delay_quality[result] < quality) {
+          delay_quality[result] = quality;
+        }
+
+        D("estimated delay: delay %d, quality %0.2f, hit %d",
+            result, quality, delay_hits[result]);
+
+        // promote adjacency
+        if (result - 1 >= 0) {
+          delay_hits[result - 1] += quality < delay_quality[result - 1] ? 2 : 1;
+        }
+        if (result + 1 < MAX_DELAY) {
+          delay_hits[result + 1] += quality < delay_quality[result + 1] ? 2 : 1;
+        }
+
+        // record best delay
+        if (2 <= delay_hits[result] && delay_quality[best_delay] < quality) {
+          best_delay = result;
+
+          D("refresh best result: delay %d, quality %0.2f, hits : %d, compare times: %d",
+              result, delay_quality[result], delay_hits[result], comp_times);
+        }
+
+        // record last delay
+        last_delay = result;
+
+        ++succ_times;
       }
-    } else {
-      result = -1;
     }
   }
 
 RETURN:
 
-  I("process(hint %d) done, result %d, elapse %dms", hint, result, (int)timestamp(t0));
+  I("process(hint %d) done, result(curr/best) %d/%d, elapse %dms", hint, result, best_delay, (int)timestamp(t0));
 
   // set |processing| as false
   pthread_mutex_lock(&process_lock);
   processing = false;
   pthread_mutex_unlock(&process_lock);
 
-  return result;
+  if (far)
+    delete[] far;
+  if (near)
+    delete[] near;
+
+  return best_delay;
 }
