@@ -24,12 +24,12 @@ class delay_estimator {
   int comp_times;
   bool processing; // is processing in progress?
   pthread_mutex_t process_lock;
+  pthread_mutex_t buf_lock;
   pthread_t process_thrd;
   SpeexEchoState *st;
 
   public:
   int async_hint; // hint param of process_async method.
-  int async_result;
   int succ_times; // success times of processing
 
   //------------------------------------------------------------
@@ -45,6 +45,8 @@ class delay_estimator {
   int process(int hint);
   bool process_async(int hint);
 
+  int get_best_delay() { return best_delay; }
+  int get_best_quality() { return best_delay >= 0 ? delay_quality[best_delay] : 0; }
   int get_far_samps() { return total_far_samps; }
   int get_near_samps() { return total_near_samps; }
 

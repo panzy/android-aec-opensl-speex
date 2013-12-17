@@ -68,10 +68,10 @@ float *to_float(short *frame);
 
 //--------------------------------------------------------------------------------
 
-SpeexEchoState *st;
-SpeexPreprocessState *den;
+SpeexEchoState *st = NULL;
+SpeexPreprocessState *den = NULL;
 
-delay_estimator *delayEst;
+delay_estimator *delayEst = NULL;
 
 static int on;
 OPENSL_STREAM  *p = NULL;
@@ -172,6 +172,8 @@ void close_dump_files()
 
 void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_delay_ms)
 {
+  echo_delay2 = -1; // 每次都重新评估
+
   playback_delay = playback_delay_ms / FRAME_MS;
 
   //
@@ -241,9 +243,15 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
 
 void runNearendProcessing() 
 {
+  const int MAX_DELAY = 50;
+  const int NEAREND_SIZE = 10;
   short inbuffer[FRAME_SAMPS]; // record
   short refbuf[FRAME_SAMPS];
   short processedbuffer[FRAME_SAMPS];
+
+  if (echo_delay2 < 0 && !delayEst) {
+    delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
+  }
 
   // delay echo_buf (relative to farend_buf)
   for (int i = 0; i < echo_delay; ++i)
@@ -304,6 +312,20 @@ void runNearendProcessing()
 
     // record
     int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
+
+    // estimate delay
+    if (samps > 0 && echo_delay2 < 0) {
+      delayEst->add_near(inbuffer, samps);
+      if (delayEst->get_near_samps() > NEAREND_SIZE + playback_delay * FRAME_SAMPS) {
+        delayEst->process_async(echo_delay);
+      }
+      if (delayEst->succ_times > 2) {
+        echo_delay2 = delayEst->get_best_delay();
+        D("got echo_delay2: %d", echo_delay2);
+        // TODO free delayEst safely
+      }
+    }
+
     if (samps == FRAME_SAMPS) {
       if (captured_samps == 0) 
         D("first time of capture at @%"PRId64"ms", timestamp(t0));
@@ -313,7 +335,7 @@ void runNearendProcessing()
 
       short *out = inbuffer; // output(send) frame
       read_circular_buffer(echo_buf, refbuf, samps);
-      if (loop_idx < playback_delay + echo_delay) {
+      if (true || loop_idx < playback_delay + echo_delay) {
         // output as-is
       } else {
         // do AEC
@@ -368,6 +390,11 @@ void cleanup()
   close_dump_files();
 #endif
   speex_ec_close();
+
+  if (delayEst) {
+    delete delayEst;
+    delayEst = NULL;
+  }
 }
 
 void estimate_delay()
@@ -413,7 +440,7 @@ void estimate_delay()
 
     usleep(FRAME_MS * 1000);
 
-      if ((result >= 0 || (result = delayEst->async_result) >= 0) && delayEst->succ_times > 2) {
+    if ((result >= 0 || (result = delayEst->get_best_delay()) >= 0) && delayEst->succ_times > 2) {
       I("delay esitmation done, result %d, elapse %dms", result, (int)timestamp(t0));
       break;
     }
@@ -452,6 +479,9 @@ int playback(short *_farend, int samps, bool with_aec_analyze)
   // analyze
   if (with_aec_analyze) {
     write_circular_buffer(echo_buf, _farend, samps);
+    if (delayEst) {
+      delayEst->add_far(_farend, samps);
+    }
   }
 
   // render
