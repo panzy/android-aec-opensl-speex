@@ -339,25 +339,20 @@ void runNearendProcessing()
       // adjust echo buffer, and read a frame for current AEC
       if (echo_delay2 >= 0 && echo_delay2 != echo_delay) {
         I("adjust echo buffer: %d=>%d", echo_delay, echo_delay2);
-#if 0 // not works
         if (echo_delay2 > echo_delay) {
           for (int i = 0, n = echo_delay2 - echo_delay; i < n; ++i) {
             write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
           }
-          echo_delay = echo_delay2;
         } else {
           // shift some frames
           for(int i = 0, n = echo_delay - echo_delay2; i < n; ++i) {
             read_circular_buffer(echo_buf, refbuf, samps);
           }
-          echo_delay = echo_delay2;
         }
         // reopen speex
         speex_ec_close();
         speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
-#else
         echo_delay = echo_delay2;
-#endif
       }
       read_circular_buffer(echo_buf, refbuf, samps);
 
