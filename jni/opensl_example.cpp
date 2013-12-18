@@ -37,6 +37,7 @@
 
 const int MAX_DELAY = 50;
 const int NEAREND_SIZE = 10;
+const int DELAY_EST_MIN_SUCC = 1;
 
 // 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
 // 供稳定的音频流。
@@ -92,7 +93,9 @@ int64_t t_start;
 
 // dump audio data
 FILE *fd_farend = NULL;
+FILE *fd_farend2 = NULL;
 FILE *fd_nearend = NULL;
+FILE *fd_nearend2 = NULL;
 FILE *fd_echo = NULL;
 FILE *fd_send = NULL;
 
@@ -152,11 +155,13 @@ void open_dump_files(const char *mode)
   int r = mkdir("/mnt/sdcard/tmp", 755);
   if (r == 0 || errno == EEXIST) {
     fd_farend = fopen("/mnt/sdcard/tmp/far.raw", mode);
+    fd_farend2 = fopen("/mnt/sdcard/tmp/far2.raw", mode);
     fd_nearend = fopen("/mnt/sdcard/tmp/near.raw", mode);
+    fd_nearend2 = fopen("/mnt/sdcard/tmp/near2.raw", mode);
     fd_echo = fopen("/mnt/sdcard/tmp/echo.raw", mode);
     fd_send = fopen("/mnt/sdcard/tmp/send.raw", mode);
   } else {
-    fd_farend = fd_nearend = fd_echo = fd_send = NULL;
+    fd_farend = fd_farend2 = fd_nearend = fd_nearend2 = fd_echo = fd_send = NULL;
   }
 }
 
@@ -164,13 +169,17 @@ void close_dump_files()
 {
   if (fd_farend)
     fclose(fd_farend);
+  if (fd_farend2)
+    fclose(fd_farend2);
   if (fd_nearend)
     fclose(fd_nearend);
+  if (fd_nearend2)
+    fclose(fd_nearend2);
   if (fd_echo)
     fclose(fd_echo);
   if (fd_send)
     fclose(fd_send);
-  fd_farend = fd_send = fd_nearend = NULL;
+  fd_farend = fd_farend2 = fd_nearend = fd_nearend2 = fd_echo = fd_send = NULL;
 }
 
 void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_delay_ms)
@@ -204,7 +213,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
   echo_delay = 18 * track_min_buf_size / 870;
   // 延迟修正不足没关系，因为 speex AEC 模块有个 filter length 参数，初始化为
   // 8xframe，但是修正过度就很严重，将完全不能消除回声。
-  echo_delay -= 4;
+  echo_delay -= 2;
 
   const int sample_size = sizeof(short);
   in_buffer_cnt = ceil((float)record_min_buf_size / sample_size / FRAME_SAMPS);
@@ -217,9 +226,9 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
   // 间的逻辑，这里也强制 in_buffer_cnt 不小于一个阈值。
   if (in_buffer_cnt < min_buffer_cnt) in_buffer_cnt = min_buffer_cnt;
 
-  D("AudioRecord min buf size %dB, AudioTrack min buf size %dB",
+  I("AudioRecord min buf size %dB, AudioTrack min buf size %dB",
       record_min_buf_size, track_min_buf_size);
-  D("OpenSL audio in-buffer samps %dx%d, out-buffer samps %dx%d, echo delay %d(x%d=%dms)",
+  I("OpenSL audio in-buffer samps %dx%d, out-buffer samps %dx%d, echo delay %d(x%d=%dms)",
       FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt,
       echo_delay, FRAME_MS, echo_delay * FRAME_MS);
 
@@ -228,7 +237,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
 
   farend_buf = create_circular_buffer(FAREND_BUFFER_SAMPS);
   nearend_buf = create_circular_buffer(NEAREND_BUFFER_SAMPS);
-  echo_buf = create_circular_buffer((echo_delay + playback_delay + 4) * 2 * FRAME_SAMPS);
+  echo_buf = create_circular_buffer((MAX_DELAY + playback_delay + 4) * 2 * FRAME_SAMPS);
 
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
 
@@ -249,10 +258,6 @@ void runNearendProcessing()
   short inbuffer[FRAME_SAMPS]; // record
   short refbuf[FRAME_SAMPS];
   short processedbuffer[FRAME_SAMPS];
-
-  //if (echo_delay2 < 0 && !delayEst) {
-  //  delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
-  //}
 
   // delay echo_buf (relative to farend_buf)
   for (int i = 0; i < echo_delay; ++i)
@@ -283,9 +288,9 @@ void runNearendProcessing()
   int max_ahead = out_buffer_cnt / 2 * FRAME_MS;
   int min_ahead = std::max(max_ahead / 2, 1);
   // ……不管怎样，下面的硬编码的值的实际效果更好
-  max_ahead = 3 * FRAME_MS;
-  min_ahead = 1 * FRAME_MS;
-  D("main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
+  //max_ahead = 3 * FRAME_MS;
+  //min_ahead = 1 * FRAME_MS;
+  I("main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
       min_ahead, max_ahead, min_ahead / FRAME_MS, max_ahead / FRAME_MS);
   while(on) {
     t1 = timestamp(0);
@@ -295,20 +300,18 @@ void runNearendProcessing()
     if (echo_delay2 < 0 && loop_idx > playback_delay + MAX_DELAY * 5) {
       if (delay_est_thrd_stopped) {
         D("start estimate_delay ");
-        close_dump_files(); // XXX 否则 estimate_delay() 会阻塞在 fopen() 上。 
+        // XXX 关闭文件，否则 estimate_delay() 会阻塞在 fopen() 上。 
+        fclose(fd_farend2);
+        fclose(fd_nearend2);
+        fd_farend2 = fd_nearend2 = NULL;
         delay_est_thrd_stopped = false;
         pthread_create(&delay_est_thrd, NULL, (void* (*)(void*))estimate_delay, 0);
       }
-
-      //if (delayEst->succ_times > 2) {
-      //  echo_delay2 = delayEst->get_best_delay();
-      //  D("got echo_delay2 %d", echo_delay2);
-      //}
     }
 
     // playback
     if (loop_idx < playback_delay) {
-      playback(silence, FRAME_SAMPS, true /* XXX test false */);
+      playback(silence, FRAME_SAMPS, true);
       rendered_samps += FRAME_SAMPS;
     } else {
       int samps = read_circular_buffer(farend_buf, inbuffer, FRAME_SAMPS);
@@ -333,11 +336,33 @@ void runNearendProcessing()
         D("first time of capture at @%"PRId64"ms", timestamp(t0));
       captured_samps += samps;
 
-      dump_audio(inbuffer, fd_nearend, samps);
+      // adjust echo buffer, and read a frame for current AEC
+      if (echo_delay2 >= 0 && echo_delay2 != echo_delay) {
+        I("adjust echo buffer: %d=>%d", echo_delay, echo_delay2);
+#if 0 // not works
+        if (echo_delay2 > echo_delay) {
+          for (int i = 0, n = echo_delay2 - echo_delay; i < n; ++i) {
+            write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
+          }
+          echo_delay = echo_delay2;
+        } else {
+          // shift some frames
+          for(int i = 0, n = echo_delay - echo_delay2; i < n; ++i) {
+            read_circular_buffer(echo_buf, refbuf, samps);
+          }
+          echo_delay = echo_delay2;
+        }
+        // reopen speex
+        speex_ec_close();
+        speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
+#else
+        echo_delay = echo_delay2;
+#endif
+      }
+      read_circular_buffer(echo_buf, refbuf, samps);
 
       short *out = inbuffer; // output(send) frame
-      read_circular_buffer(echo_buf, refbuf, samps);
-      if (true || loop_idx < playback_delay + echo_delay) {
+      if (loop_idx < playback_delay + echo_delay) {
         // output as-is
       } else {
         // do AEC
@@ -347,8 +372,10 @@ void runNearendProcessing()
       }
       // output
       write_circular_buffer(nearend_buf, out, samps);
-      dump_audio(out, fd_send, samps);
+      dump_audio(inbuffer, fd_nearend, samps);
+      dump_audio(inbuffer, fd_nearend2, samps);
       dump_audio(refbuf, fd_echo, samps);
+      dump_audio(out, fd_send, samps);
     } else {
       D("record nothing at @%"PRId64"ms", timestamp(t0));
     }
@@ -362,7 +389,7 @@ void runNearendProcessing()
       if (curr_ahead > 0) {
         D("idle: %"PRId64"ms", curr_ahead);
       } else {
-        D("idle: overrun for %"PRId64"ms!", -curr_ahead);
+        E("idle: overrun for %"PRId64"ms!", -curr_ahead);
       }
     }
     // balance total idle
@@ -371,6 +398,8 @@ void runNearendProcessing()
       total_ahead = total_ahead - min_ahead;
       //D("idle: sleep %"PRId64"ms", total_ahead);
       usleep(1000 * total_ahead);
+    } else if (total_ahead < -1 * FRAME_MS) {
+      E("idle: overrun for %"PRId64"ms!", -total_ahead);
     }
   }
 
@@ -405,8 +434,8 @@ int estimate_delay(int async)
   short near[FRAME_SAMPS];
   delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
 
-  FILE *fd_f = fopen("/mnt/sdcard/tmp/far.raw", "r");
-  FILE *fd_n = fopen("/mnt/sdcard/tmp/near.raw", "r");
+  FILE *fd_f = fopen("/mnt/sdcard/tmp/far2.raw", "r");
+  FILE *fd_n = fopen("/mnt/sdcard/tmp/near2.raw", "r");
   if (!fd_f || !fd_n) {
       E("failed to open dump files at %d", __LINE__ );
       return 0;
@@ -437,16 +466,21 @@ int estimate_delay(int async)
       } else {
         D("near samps %d", delayEst->get_near_samps());
       }
+      usleep(FRAME_MS * 1000);
     }
 
-    usleep(FRAME_MS * 1000);
-
-    if ((result >= 0 || (result = delayEst->get_best_delay()) >= 0) && delayEst->succ_times > 1) {
+    if ((result >= 0 || (result = delayEst->get_best_delay()) >= 0)
+        && delayEst->succ_times > DELAY_EST_MIN_SUCC) {
       break;
     }
   }
 
-  I("delay esitmation done, result %d, elapse %dms", result, (int)timestamp(t0));
+  // ahead a little
+  echo_delay2 = result - 2;
+  if (echo_delay2 < 0) echo_delay2 = 0;
+
+  I("delay estimation done, result %d, elapse %dms", result, (int)timestamp(t0));
+  I("got echo_delay2 %d", echo_delay2);
 
   fclose(fd_f);
   fclose(fd_n);
@@ -454,7 +488,7 @@ int estimate_delay(int async)
     delete delayEst;
     delayEst = NULL;
   }
-
+  delay_est_thrd_stopped = true;
   return 0;
 }
 
@@ -491,6 +525,7 @@ int playback(short *_farend, int samps, bool with_aec_analyze)
 
   // render
   dump_audio(_farend, fd_farend, samps);
+  dump_audio(_farend, fd_farend2, samps);
   return android_AudioOut(p,_farend,samps);
 }
 

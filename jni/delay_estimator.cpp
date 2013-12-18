@@ -12,7 +12,7 @@
 
 #define TAG "aec_est" // log tag
 
-const int SEARCH_STEP = 2;
+const int SEARCH_STEP = 1;
 
 // get timestamp of today in ms.
 int64_t delay_estimator::timestamp(int64_t base)
