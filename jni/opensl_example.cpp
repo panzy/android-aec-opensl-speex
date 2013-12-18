@@ -35,6 +35,9 @@
 #define WEBRTC_SPECTRUM_MS (WEBRTC_SPECTRUM_SIZE * FRAME_MS / FRAME_SAMPS)
 #define WEBRTC_HISTORY_SIZE ((1500 / 1000) * SR * SAMPLE_SIZE)
 
+const int MAX_DELAY = 50;
+const int NEAREND_SIZE = 10;
+
 // 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
 // 供稳定的音频流。
 // 这个缓冲区对 echo delay 不会产生影响。
@@ -243,8 +246,6 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
 
 void runNearendProcessing() 
 {
-  const int MAX_DELAY = 50;
-  const int NEAREND_SIZE = 10;
   short inbuffer[FRAME_SAMPS]; // record
   short refbuf[FRAME_SAMPS];
   short processedbuffer[FRAME_SAMPS];
@@ -291,7 +292,7 @@ void runNearendProcessing()
     ++loop_idx;
 
     // estimate echo delay
-    if (echo_delay2 < 0 && loop_idx > playback_delay + 50) {
+    if (echo_delay2 < 0 && loop_idx > playback_delay + MAX_DELAY * 5) {
       if (delay_est_thrd_stopped) {
         D("start estimate_delay ");
         close_dump_files(); // XXX 否则 estimate_delay() 会阻塞在 fopen() 上。 
@@ -400,8 +401,6 @@ void cleanup()
 
 int estimate_delay(int async)
 {
-  const int MAX_DELAY = 50;
-  const int NEAREND_SIZE = 10;
   short far[MAX_DELAY * FRAME_SAMPS];
   short near[FRAME_SAMPS];
   delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
@@ -410,7 +409,7 @@ int estimate_delay(int async)
   FILE *fd_n = fopen("/mnt/sdcard/tmp/near.raw", "r");
   if (!fd_f || !fd_n) {
       E("failed to open dump files at %d", __LINE__ );
-      return NULL;
+      return 0;
   }
 
   int64_t t0 = timestamp(0);
@@ -442,11 +441,12 @@ int estimate_delay(int async)
 
     usleep(FRAME_MS * 1000);
 
-    if ((result >= 0 || (result = delayEst->get_best_delay()) >= 0) && delayEst->succ_times > 2) {
-      I("delay esitmation done, result %d, elapse %dms", result, (int)timestamp(t0));
+    if ((result >= 0 || (result = delayEst->get_best_delay()) >= 0) && delayEst->succ_times > 1) {
       break;
     }
   }
+
+  I("delay esitmation done, result %d, elapse %dms", result, (int)timestamp(t0));
 
   fclose(fd_f);
   fclose(fd_n);
@@ -455,7 +455,7 @@ int estimate_delay(int async)
     delayEst = NULL;
   }
 
-  return NULL;
+  return 0;
 }
 
 int pull(JNIEnv *env, jshortArray buf)

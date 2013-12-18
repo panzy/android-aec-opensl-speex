@@ -48,8 +48,8 @@ class delay_estimator {
   int process(int hint);
   bool process_async(int hint);
 
-  int get_best_delay() { return best_delay; }
-  int get_best_quality() { return best_delay >= 0 ? delay_quality[best_delay] : 0; }
+  int get_best_delay() { return best_delay <= 0 ? last_delay : best_delay; }
+  int get_best_quality() { return get_best_delay() >= 0 ? delay_quality[get_best_delay()] : 0; }
   int get_far_samps() { return total_far_samps; }
   int get_near_samps() { return total_near_samps; }
   int is_processing();
