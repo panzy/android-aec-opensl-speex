@@ -311,7 +311,7 @@ void runNearendProcessing()
 
     // playback
     if (loop_idx < playback_delay) {
-      playback(silence, FRAME_SAMPS, true);
+      playback(silence, FRAME_SAMPS, false);
       rendered_samps += FRAME_SAMPS;
     } else {
       int samps = read_circular_buffer(farend_buf, inbuffer, FRAME_SAMPS);
@@ -368,7 +368,8 @@ void runNearendProcessing()
       // output
       write_circular_buffer(nearend_buf, out, samps);
       dump_audio(inbuffer, fd_nearend, samps);
-      dump_audio(inbuffer, fd_nearend2, samps);
+      if (loop_idx > playback_delay && fd_nearend2)
+        dump_audio(inbuffer, fd_nearend2, samps);
       dump_audio(refbuf, fd_echo, samps);
       dump_audio(out, fd_send, samps);
     } else {
@@ -512,15 +513,12 @@ int playback(short *_farend, int samps, bool with_aec_analyze)
 {
   // analyze
   if (with_aec_analyze) {
-    write_circular_buffer(echo_buf, _farend, samps);
-    //if (delayEst) {
-    //  delayEst->add_far(_farend, samps);
-    //}
+    dump_audio(_farend, fd_farend2, samps);
   }
 
   // render
+  write_circular_buffer(echo_buf, _farend, samps);
   dump_audio(_farend, fd_farend, samps);
-  dump_audio(_farend, fd_farend2, samps);
   return android_AudioOut(p,_farend,samps);
 }
 
