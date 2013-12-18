@@ -37,7 +37,7 @@
 
 const int MAX_DELAY = 50;
 const int NEAREND_SIZE = 10;
-const int DELAY_EST_MIN_SUCC = 1;
+const int DELAY_EST_MIN_SUCC = 2;
 
 // 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
 // 供稳定的音频流。
@@ -368,7 +368,7 @@ void runNearendProcessing()
       // output
       write_circular_buffer(nearend_buf, out, samps);
       dump_audio(inbuffer, fd_nearend, samps);
-      if (loop_idx > playback_delay && fd_nearend2)
+      if (captured_samps > playback_delay * FRAME_SAMPS && fd_nearend2)
         dump_audio(inbuffer, fd_nearend2, samps);
       dump_audio(refbuf, fd_echo, samps);
       dump_audio(out, fd_send, samps);
@@ -472,7 +472,7 @@ int estimate_delay(int async)
   }
 
   // ahead a little
-  echo_delay2 = result - 2;
+  echo_delay2 = result;
   if (echo_delay2 < 0) echo_delay2 = 0;
 
   I("delay estimation done, result %d, elapse %dms", result, (int)timestamp(t0));

@@ -23,6 +23,7 @@ class delay_estimator {
   char *delay_hits; // [delay] => hit_times
   float *delay_quality; // [delay] => quality
   int best_delay;
+  int second_best_delay;
   int last_delay;
   int comp_times;
   bool processing; // is processing in progress?
@@ -49,6 +50,7 @@ class delay_estimator {
   bool process_async(int hint);
 
   int get_best_delay() { return best_delay <= 0 ? last_delay : best_delay; }
+  int get_2nd_best_delay() { return second_best_delay; }
   int get_best_quality() { return get_best_delay() >= 0 ? delay_quality[get_best_delay()] : 0; }
   int get_far_samps() { return total_far_samps; }
   int get_near_samps() { return total_near_samps; }

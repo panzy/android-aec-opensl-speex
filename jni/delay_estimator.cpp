@@ -147,6 +147,7 @@ delay_estimator::delay_estimator(int sr, int frame_samps, int max_delay, int nea
   total_far_samps(0),
   total_near_samps(0),
   best_delay(-1),
+  second_best_delay(-1),
   last_delay(0),
   comp_times(0),
   processing(false),
@@ -350,7 +351,10 @@ int delay_estimator::process(int hint)
             }
 
             // record best delay
-            if (2 <= delay_hits[result] && delay_quality[best_delay] < quality) {
+            if (best_delay != result
+                && 2 <= delay_hits[result]
+                && delay_quality[best_delay] < quality) {
+              second_best_delay = best_delay;
                 best_delay = result;
 
                 D("refresh best result: delay %d, quality %0.2f, hits : %d, compare times: %d",
