@@ -471,8 +471,12 @@ int estimate_delay(int async)
     }
   }
 
-  // ahead a little
-  echo_delay2 = result;
+  // 为保险起见，倾向于选择偏小一点的值
+  int r2 = delayEst->get_2nd_best_delay();
+  if (r2 >= 0 && r2 >= result - 2)
+    echo_delay2 = result - 2;
+  else
+    echo_delay2 = result;
   if (echo_delay2 < 0) echo_delay2 = 0;
 
   I("delay estimation done, result %d, elapse %dms", result, (int)timestamp(t0));
