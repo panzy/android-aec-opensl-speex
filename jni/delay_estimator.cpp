@@ -1,3 +1,7 @@
+/*
+ * vim: shiftwidth=2
+ */
+
 #include "delay_estimator.h"
 #include "common.h"
 #include <stdlib.h>
@@ -306,17 +310,33 @@ int delay_estimator::process(int hint)
 
     int pos_far = total_far_samps_ < MAX_FAR_SAMPS ? 0 : total_far_samps_ - MAX_FAR_SAMPS;
     int pos_near = total_near_samps_ - MAX_NEAR_SAMPS;
+    int d = -1; // result of search_audio()
 
-    int d = -1;
+    // formula:
+    // pos_far + d = pos_near - delay
+    // 
+    // |------------------------------------------------------------> time
+    // |
+    // |        pos_far
+    // |----------|===========|//////|==========|------------------- farend
+    // |          |<----d---->|                 |
+    // |          |<-----------MAX_FAR--------->|
+    // |                      |
+    // |                      |             pos_near
+    // |----------------------|---------------|//////|-------------- nearend
+    // |                      |<----delay---->|      |
+    // |                                      |<---->|
+    // |                                      MAX_NEAR
+    // |
 
     // use |last_delay| as search hint for better efficiency
     if (hint <= 0)
         hint = last_delay;
 
-    // search the |k|-th frame of |far| buffer
-    int k = (total_near_samps_ - total_far_samps_ - MAX_NEAR_SAMPS + MAX_FAR_SAMPS) / FRAME_SAMPS - hint;
+    // search from the |k|-th frame of |far| buffer
+    int k = (pos_near - pos_far) / FRAME_SAMPS - hint;
 
-    if (true /* TODO */ || hint <= 0 || k <= 0) {
+    if (hint <= 0 || k <= 0) {
         // search from the begining of |far| buffer
         d = search_audio(far, MAX_FAR_SAMPS, near, MAX_NEAR_SAMPS, &quality);
     } else {
@@ -339,8 +359,12 @@ int delay_estimator::process(int hint)
                 delay_quality[result] = quality;
             }
 
-            D("estimated delay: delay %d, quality %0.2f, hit %d",
-                    result, quality, delay_hits[result]);
+            D("search_audio, delay %d=(pn %d - pf %d - d %d), quality %0.2f, hit %d",
+                    result,
+                    pos_near / FRAME_SAMPS,
+                    pos_far / FRAME_SAMPS,
+                    d,
+                    quality, delay_hits[result]);
 
             // promote adjacency
             if (result - 1 >= 0) {
@@ -368,7 +392,7 @@ int delay_estimator::process(int hint)
         }
     }
 
-    I("process done, hint %d, range (%d~%d,%d~%d), result(best/curr) %d/%d, quality %0.2f/%0.2f, elapse %dms",
+    I("process done, (%d,%d~%d,%d~%d), result(best/curr) %d/%d, q %0.2f/%0.2f, %dms",
         hint,
         pos_near / FRAME_SAMPS,
         total_near_samps_ / FRAME_SAMPS,

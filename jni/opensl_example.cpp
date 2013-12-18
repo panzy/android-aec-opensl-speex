@@ -1,5 +1,6 @@
 /*
-*/
+ * vim: shiftwidth=2
+ */
 
 #include <jni.h>
 #include <sys/time.h>
@@ -102,7 +103,7 @@ FILE *fd_send = NULL;
 short silence[FRAME_SAMPS];
 
 int playback_delay = 0; // samps
-int echo_delay = 0; // samps, relative to playback
+int echo_delay = -1; // samps, relative to playback
 int echo_delay2 = -1; // samps, relative to playback, estimated by WebRtc 
 int in_buffer_cnt = 0;
 int out_buffer_cnt = 0;
@@ -438,27 +439,27 @@ int estimate_delay(int async)
   }
 
   int64_t t0 = timestamp(0);
-  int i = 0;
   int result = -1;
+  int i = 0;
   fseek(fd_n, i * FRAME_SAMPS * 2, SEEK_SET);
   for (; /*i < MAX_DELAY * 40*/; ++i)
   {
-    if(FRAME_SAMPS != fread(far, 2, FRAME_SAMPS, fd_f))
+    if (FRAME_SAMPS != fread(far, 2, FRAME_SAMPS, fd_f))
       break;
     delayEst->add_far(far, FRAME_SAMPS);
 
-    fread(near, 2, FRAME_SAMPS, fd_n);
+    if (FRAME_SAMPS != fread(near, 2, FRAME_SAMPS, fd_n))
+      break;
 
     delayEst->add_near(near, FRAME_SAMPS);
 
     if (!async) {
       // sync call
-      result = delayEst->process(12);
+      result = delayEst->process(echo_delay);
     } else {
       // async call
       if (delayEst->get_near_samps() > NEAREND_SIZE) {
-        delayEst->process_async(12);
-        //usleep(100 * 1000); // TODO need to fix
+        delayEst->process_async(echo_delay);
       } else {
         D("near samps %d", delayEst->get_near_samps());
       }
