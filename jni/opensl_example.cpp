@@ -584,10 +584,9 @@ void speex_ec_open (int sampleRate, int bufsize, int totalSize)
   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_ECHO_STATE, st);
   int value_on = 1;
   int value_off = 1;
-  //看不出AGC和VAD的效果
-  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value_off);
-  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value_off);
-  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_DENOISE, &value_off);
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value_on);
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value_on);
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_DENOISE, &value_on);
 }
 
 void speex_ec_close ()
