@@ -53,7 +53,7 @@ const int ECHO_DELAY_FAILED = -2;
 
 #define TAG "aec" // log tag
 
-#define DUMP_RAW 1
+#define DUMP_RAW 0
 #if DUMP_RAW
 #define DUMP_SAMPS(p,f,n) fwrite_samps(p,f,n)
 #else
@@ -345,7 +345,7 @@ void runNearendProcessing()
       int lack_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - rendered_samps;
       lack_samps += 2 * FRAME_SAMPS; // 不但不应该紧缺，还应该有点富余
       if (lack_samps > 0) {
-        W("playback underrun, lack of %d samps", lack_samps);
+        D("playback underrun, lack of %d samps", lack_samps);
         align_farend_buf(lack_samps);
         rendered_samps += lack_samps;
       }
