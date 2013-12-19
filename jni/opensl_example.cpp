@@ -53,11 +53,11 @@ const int ECHO_DELAY_FAILED = -2;
 
 #define TAG "aec" // log tag
 
-#define DUMP_PCM true
-#if DUMP_PCM
-#define dump_audio(p,f,n) dump_audio_(p,f,n)
+#define DUMP_RAW 1
+#if DUMP_RAW
+#define DUMP_SAMPS(p,f,n) fwrite_samps(p,f,n)
 #else
-#define dump_audio(p,f,n) do {} while (0);
+#define DUMP_SAMPS(p,f,n) (0)
 #endif
 
 //--------------------------------------------------------------------------------
@@ -66,7 +66,7 @@ const int ECHO_DELAY_FAILED = -2;
 //--------------------------------------------------------------------------------
 
 void cleanup();
-void dump_audio_(short *frame, FILE *fd, int samps);
+void fwrite_samps(short *frame, FILE *fd, int samps);
 void speex_ec_open (int sampleRate, int bufsize, int totalSize);
 void speex_ec_close ();
 int playback(short *_farend, int samps, bool with_aec_analyze);
@@ -129,11 +129,11 @@ void align_nearend_buf(int n) {
   while (n > 0) {
     if (n <= FRAME_SAMPS) {
       write_circular_buffer(nearend_buf, silence, n);
-      dump_audio(silence, fd_nearend, n);
+      DUMP_SAMPS(silence, fd_nearend, n);
       n = 0;
     } else {
       write_circular_buffer(nearend_buf, silence, FRAME_SAMPS);
-      dump_audio(silence, fd_nearend, FRAME_SAMPS);
+      DUMP_SAMPS(silence, fd_nearend, FRAME_SAMPS);
       n -= FRAME_SAMPS;
     }
   }
@@ -147,7 +147,7 @@ int64_t timestamp(int64_t base)
   return ((int64_t)t.tv_sec * 1000 + (int64_t)(t.tv_usec / 1000)) - base;
 }
 
-void dump_audio_(short *frame, FILE *fd, int samps)
+void fwrite_samps(short *frame, FILE *fd, int samps)
 {
   if (fd) {
     fwrite(frame, samps, 2, fd);
@@ -158,31 +158,39 @@ void open_dump_files(const char *mode)
 {
   int r = mkdir("/mnt/sdcard/tmp", 755);
   if (r == 0 || errno == EEXIST) {
-    fd_farend = fopen("/mnt/sdcard/tmp/far.raw", mode);
     fd_farend2 = fopen("/mnt/sdcard/tmp/far2.raw", mode);
-    fd_nearend = fopen("/mnt/sdcard/tmp/near.raw", mode);
     fd_nearend2 = fopen("/mnt/sdcard/tmp/near2.raw", mode);
+  } else {
+    fd_farend2 = fd_nearend2 = NULL;
+  }
+#if DUMP_RAW
+  if (r == 0 || errno == EEXIST) {
+    fd_farend = fopen("/mnt/sdcard/tmp/far.raw", mode);
+    fd_nearend = fopen("/mnt/sdcard/tmp/near.raw", mode);
     fd_echo = fopen("/mnt/sdcard/tmp/echo.raw", mode);
     fd_send = fopen("/mnt/sdcard/tmp/send.raw", mode);
   } else {
-    fd_farend = fd_farend2 = fd_nearend = fd_nearend2 = fd_echo = fd_send = NULL;
+    fd_farend = fd_nearend = fd_echo = fd_send = NULL;
   }
+#endif
 }
 
 void close_dump_files()
 {
-  if (fd_farend)
-    fclose(fd_farend);
   if (fd_farend2)
     fclose(fd_farend2);
-  if (fd_nearend)
-    fclose(fd_nearend);
   if (fd_nearend2)
     fclose(fd_nearend2);
+#if DUMP_RAW
+  if (fd_farend)
+    fclose(fd_farend);
+  if (fd_nearend)
+    fclose(fd_nearend);
   if (fd_echo)
     fclose(fd_echo);
   if (fd_send)
     fclose(fd_send);
+#endif
   fd_farend = fd_farend2 = fd_nearend = fd_nearend2 = fd_echo = fd_send = NULL;
 }
 
@@ -245,9 +253,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
 
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
 
-#if DUMP_PCM
   open_dump_files("w+");
-#endif
   on = 1;
   t_start = timestamp(0);
   echo_delay2 = ECHO_DELAY_NULL; // 每次都重新评估
@@ -322,7 +328,9 @@ void runNearendProcessing()
       }
     }
 
+    //
     // playback
+    //
     if (loop_idx < playback_delay) {
       playback(silence, FRAME_SAMPS, false);
       rendered_samps += FRAME_SAMPS;
@@ -335,13 +343,13 @@ void runNearendProcessing()
       // pad underrun with silence
       // |playback_delay| 可以显著减少这种情况的发生
       int lack_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - rendered_samps;
+      lack_samps += 2 * FRAME_SAMPS; // 不但不应该紧缺，还应该有点富余
       if (lack_samps > 0) {
         W("playback underrun, lack of %d samps", lack_samps);
         align_farend_buf(lack_samps);
         rendered_samps += lack_samps;
       }
     }
-    
     // 平衡 rendered_samps 与物理时间
     //int64_t total_ahead = (loop_idx * FRAME_MS) - timestamp(t0);
     int64_t total_ahead = (rendered_samps / FRAME_SAMPS * FRAME_MS) - timestamp(t0);
@@ -353,7 +361,9 @@ void runNearendProcessing()
       E("idle: total overrun for %"PRId64"ms!", -total_ahead);
     }
 
+    //
     // record
+    //
     int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
     if (samps == FRAME_SAMPS) {
       if (captured_samps == 0) 
@@ -397,11 +407,11 @@ void runNearendProcessing()
       }
       // output
       write_circular_buffer(nearend_buf, out, samps);
-      dump_audio(inbuffer, fd_nearend, samps);
+      DUMP_SAMPS(inbuffer, fd_nearend, samps);
       if (captured_samps > playback_delay * FRAME_SAMPS && fd_nearend2)
-        dump_audio(inbuffer, fd_nearend2, samps);
-      dump_audio(refbuf, fd_echo, samps);
-      dump_audio(out, fd_send, samps);
+        fwrite_samps(inbuffer, fd_nearend2, samps);
+      DUMP_SAMPS(refbuf, fd_echo, samps);
+      DUMP_SAMPS(out, fd_send, samps);
     } else {
       D("record nothing at @%"PRId64"ms", timestamp(t0));
     }
@@ -431,9 +441,7 @@ void cleanup()
   free_circular_buffer(farend_buf);
   free_circular_buffer(echo_buf);
   free_circular_buffer(nearend_buf);
-#if DUMP_PCM
   close_dump_files();
-#endif
   speex_ec_close();
 
   if (delayEst) {
@@ -492,11 +500,15 @@ int estimate_delay(int async)
   }
 
   // 为保险起见，倾向于选择偏小一点的值
+#if 0
   int r2 = delayEst->get_2nd_best_delay();
   if (r2 >= 0 && r2 >= result - 2)
     echo_delay2 = result - 2;
   else
     echo_delay2 = result;
+#else
+  echo_delay2 = result - 2;
+#endif
   if (echo_delay2 < 0) echo_delay2 = ECHO_DELAY_FAILED;
 
   I("delay estimation done, result %d, elapse %dms", result, (int)timestamp(t0));
@@ -537,12 +549,12 @@ int playback(short *_farend, int samps, bool with_aec_analyze)
 {
   // analyze
   if (with_aec_analyze) {
-    dump_audio(_farend, fd_farend2, samps);
+    fwrite_samps(_farend, fd_farend2, samps);
   }
 
   // render
   write_circular_buffer(echo_buf, _farend, samps);
-  dump_audio(_farend, fd_farend, samps);
+  DUMP_SAMPS(_farend, fd_farend, samps);
   return android_AudioOut(p,_farend,samps);
 }
 
