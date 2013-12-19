@@ -38,7 +38,10 @@
 
 const int MAX_DELAY = 50;
 const int NEAREND_SIZE = 10;
-const int DELAY_EST_MIN_SUCC = 2;
+const int DELAY_EST_MIN_SUCC = 4;
+// 回声延迟（以frame为单位）的有效值 >= 0，下面是几个特殊的无效值
+const int ECHO_DELAY_NULL = -1;
+const int ECHO_DELAY_FAILED = -2;
 
 // 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
 // 供稳定的音频流。
@@ -103,8 +106,8 @@ FILE *fd_send = NULL;
 short silence[FRAME_SAMPS];
 
 int playback_delay = 0; // samps
-int echo_delay = -1; // samps, relative to playback
-int echo_delay2 = -1; // samps, relative to playback, estimated by WebRtc 
+int echo_delay = ECHO_DELAY_NULL; // samps, relative to playback
+int echo_delay2 = ECHO_DELAY_NULL; // samps, relative to playback, estimated by WebRtc 
 int in_buffer_cnt = 0;
 int out_buffer_cnt = 0;
 
@@ -215,6 +218,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
   // 延迟修正不足没关系，因为 speex AEC 模块有个 filter length 参数，初始化为
   // 8xframe，但是修正过度就很严重，将完全不能消除回声。
   echo_delay -= 2;
+  echo_delay = ECHO_DELAY_NULL; // XXX test
 
   const int sample_size = sizeof(short);
   in_buffer_cnt = ceil((float)record_min_buf_size / sample_size / FRAME_SAMPS);
@@ -247,7 +251,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
 #endif
   on = 1;
   t_start = timestamp(0);
-  echo_delay2 = -1; // 每次都重新评估
+  echo_delay2 = ECHO_DELAY_NULL; // 每次都重新评估
   delay_est_thrd_stopped = true;
 
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
@@ -261,8 +265,10 @@ void runNearendProcessing()
   short processedbuffer[FRAME_SAMPS];
 
   // delay echo_buf (relative to farend_buf)
-  for (int i = 0; i < echo_delay; ++i)
-    write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
+  if (echo_delay > 0) {
+    for (int i = 0; i < echo_delay; ++i)
+      write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
+  }
 
   //
   // 每次循环处理一个 FRAME
@@ -298,7 +304,7 @@ void runNearendProcessing()
     ++loop_idx;
 
     // estimate echo delay
-    if (echo_delay2 < 0 && loop_idx > playback_delay + MAX_DELAY * 5) {
+    if (echo_delay2 == ECHO_DELAY_NULL && loop_idx > playback_delay + MAX_DELAY * 5) {
       if (delay_est_thrd_stopped) {
         D("start estimate_delay ");
         // XXX 关闭文件，否则 estimate_delay() 会阻塞在 fopen() 上。 
@@ -340,14 +346,20 @@ void runNearendProcessing()
       // adjust echo buffer, and read a frame for current AEC
       if (echo_delay2 >= 0 && echo_delay2 != echo_delay) {
         I("adjust echo buffer: %d=>%d", echo_delay, echo_delay2);
-        if (echo_delay2 > echo_delay) {
-          for (int i = 0, n = echo_delay2 - echo_delay; i < n; ++i) {
-            write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
+        if (echo_delay >= 0) {
+          if (echo_delay2 > echo_delay + 2) {
+            for (int i = 0, n = echo_delay2 - echo_delay; i < n; ++i) {
+              write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
+            }
+          } else {
+            // shift some frames
+            for(int i = 0, n = echo_delay - echo_delay2; i < n; ++i) {
+              read_circular_buffer(echo_buf, refbuf, samps);
+            }
           }
         } else {
-          // shift some frames
-          for(int i = 0, n = echo_delay - echo_delay2; i < n; ++i) {
-            read_circular_buffer(echo_buf, refbuf, samps);
+          for (int i = 0, n = echo_delay2; i < n; ++i) {
+            write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
           }
         }
         // reopen speex
@@ -358,7 +370,7 @@ void runNearendProcessing()
       read_circular_buffer(echo_buf, refbuf, samps);
 
       short *out = inbuffer; // output(send) frame
-      if (loop_idx < playback_delay + echo_delay) {
+      if (loop_idx < playback_delay + echo_delay || echo_delay <= 0) {
         // output as-is
       } else {
         // do AEC
@@ -478,7 +490,7 @@ int estimate_delay(int async)
     echo_delay2 = result - 2;
   else
     echo_delay2 = result;
-  if (echo_delay2 < 0) echo_delay2 = 0;
+  if (echo_delay2 < 0) echo_delay2 = ECHO_DELAY_FAILED;
 
   I("delay estimation done, result %d, elapse %dms", result, (int)timestamp(t0));
   I("got echo_delay2 %d", echo_delay2);

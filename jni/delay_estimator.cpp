@@ -56,7 +56,7 @@ void delay_estimator::echo_cancel(short *in, short *ref, int samps,
 {
   // 由于我们要查找的delay是精确到单个frame的，speex 的 filter length 为 1xframe
   // 即可（1xframe 比 2xframe 快大约 20%）
-  speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * SEARCH_STEP);
+  speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 4 * SEARCH_STEP);
 
   short *p1 = in, *p2 = ref, *p3 = out;
   int n = samps;
@@ -112,6 +112,7 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
     }
 
     pos += FRAME_SAMPS * SEARCH_STEP;
+    usleep(2000); // 如果占用太多CPU资源，音频主线程可能受影响
   }
 
   // dump best result
