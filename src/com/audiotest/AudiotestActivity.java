@@ -119,6 +119,7 @@ public class AudiotestActivity extends Activity {
 
                         ++loopIdx;
                         long ahead = (loopIdx * FRAME_MS) - (System.currentTimeMillis() - t0);
+                        ahead -= 100;
                         if (ahead > 0) {
                             sleep(ahead);
                         }

@@ -5,6 +5,7 @@
 #include <bits/stl_algobase.h>
 
 #define I(fmt, ...)  __android_log_print(ANDROID_LOG_INFO, TAG, fmt, ##__VA_ARGS__);
+#define W(fmt, ...)  __android_log_print(ANDROID_LOG_WARN, TAG, fmt, ##__VA_ARGS__);
 #define E(fmt, ...)  __android_log_print(ANDROID_LOG_ERROR, TAG, fmt, ##__VA_ARGS__);
 
 #if 0

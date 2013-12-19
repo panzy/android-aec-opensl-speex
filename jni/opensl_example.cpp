@@ -218,14 +218,13 @@ void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_dela
   // 延迟修正不足没关系，因为 speex AEC 模块有个 filter length 参数，初始化为
   // 8xframe，但是修正过度就很严重，将完全不能消除回声。
   echo_delay -= 2;
-  echo_delay = ECHO_DELAY_NULL; // XXX test
 
   const int sample_size = sizeof(short);
   in_buffer_cnt = ceil((float)record_min_buf_size / sample_size / FRAME_SAMPS);
   out_buffer_cnt = ceil((float)track_min_buf_size / sample_size / FRAME_SAMPS);
 
   // 太小的 out_buffer_cnt （比如3） 不足以保证流畅的播放。
-  const int min_buffer_cnt = 10;
+  const int min_buffer_cnt = 20;
   if (out_buffer_cnt < min_buffer_cnt) out_buffer_cnt = min_buffer_cnt;
   // 尚未观测到 in_buffer_cnt 太小的直接影响，不过为了简化主循环中控制 ahead 时
   // 间的逻辑，这里也强制 in_buffer_cnt 不小于一个阈值。
@@ -273,11 +272,6 @@ void runNearendProcessing()
   //
   // 每次循环处理一个 FRAME
   //
-  int loop_idx = -1;
-  int64_t t0 = timestamp(0), t1 = 0; // loop body begins
-  int64_t total_ahead = 0; // 累计剩余时间
-  int rendered_samps = 0;
-  int captured_samps = 0;
   //
   // 我们并不试图让每一次循环的持续时间精确为 FRAME_MS，因为这不可能做到：尽管绝
   // 大多数情况下我们只需要比如说3ms就处理完了一个frame，但是偶尔（进程调度？）
@@ -288,17 +282,29 @@ void runNearendProcessing()
   // nearend_buf 中的未读数据会被覆盖；
   // B. 但也不能太慢，否则OpenSL OPENSL_STREAM->inrb 中的未读数据会被覆盖。
   //
-  // XXX 另外，AudioSystem record buffer overflow 好像也跟这个有关。
+  // 另外，AudioSystem record buffer overflow 好像也跟这个有关。
   //
   // 把时间提前量定义为
   //    ahead = 物理时长 - 已处理的音频的时长
   int max_ahead = out_buffer_cnt / 2 * FRAME_MS;
   int min_ahead = std::max(max_ahead / 2, 1);
-  // ……不管怎样，下面的硬编码的值的实际效果更好
-  //max_ahead = 3 * FRAME_MS;
-  //min_ahead = 1 * FRAME_MS;
   I("main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
       min_ahead, max_ahead, min_ahead / FRAME_MS, max_ahead / FRAME_MS);
+
+  // 每次循环后:
+  // 1, loop_idx++
+  // 2, rendered_samps += 略大于等价的物理流逝时间
+  // 
+  // 对于第2条，我们通过以下手段保证：
+  // A, 如果上游提供的 far buffer 供应不足，用静音补充
+  // B, 如果向下游（OpenSL）提供的 out buffer 达到某阈值，sleep
+  //
+  // 总之，循环的节奏从根本上说以物理时间为准。
+  //
+  int loop_idx = -1;
+  int rendered_samps = 0;
+  int captured_samps = 0;
+  int64_t t0 = timestamp(0), t1 = 0; // loop body begins
   while(on) {
     t1 = timestamp(0);
     ++loop_idx;
@@ -330,10 +336,21 @@ void runNearendProcessing()
       // |playback_delay| 可以显著减少这种情况的发生
       int lack_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - rendered_samps;
       if (lack_samps > 0) {
-        D("playback underrun, lack of %d samps", lack_samps);
+        W("playback underrun, lack of %d samps", lack_samps);
         align_farend_buf(lack_samps);
         rendered_samps += lack_samps;
       }
+    }
+    
+    // 平衡 rendered_samps 与物理时间
+    //int64_t total_ahead = (loop_idx * FRAME_MS) - timestamp(t0);
+    int64_t total_ahead = (rendered_samps / FRAME_SAMPS * FRAME_MS) - timestamp(t0);
+    if (total_ahead > max_ahead) {
+      total_ahead = total_ahead - min_ahead;
+      //D("idle: sleep %"PRId64"ms", total_ahead);
+      usleep(1000 * total_ahead);
+    } else if (total_ahead < -0 * FRAME_MS) {
+      E("idle: total overrun for %"PRId64"ms!", -total_ahead);
     }
 
     // record
@@ -389,26 +406,14 @@ void runNearendProcessing()
       D("record nothing at @%"PRId64"ms", timestamp(t0));
     }
 
-    //
-    // idle
-    //
-    // log current idle
-    if (0) {
+    // log time elapse
+    if (1) {
       int64_t curr_ahead = FRAME_MS - timestamp(t1);
       if (curr_ahead > 0) {
-        D("idle: %"PRId64"ms", curr_ahead);
+        D("idle: curr %"PRId64"ms", curr_ahead);
       } else {
-        E("idle: overrun for %"PRId64"ms!", -curr_ahead);
+        D("idle: curr overrun for %"PRId64"ms!", -curr_ahead);
       }
-    }
-    // balance total idle
-    total_ahead = (loop_idx * FRAME_MS) - timestamp(t0);
-    if (total_ahead > max_ahead) {
-      total_ahead = total_ahead - min_ahead;
-      //D("idle: sleep %"PRId64"ms", total_ahead);
-      usleep(1000 * total_ahead);
-    } else if (total_ahead < -1 * FRAME_MS) {
-      E("idle: overrun for %"PRId64"ms!", -total_ahead);
     }
   }
 
@@ -465,13 +470,15 @@ int estimate_delay(int async)
 
     delayEst->add_near(near, FRAME_SAMPS);
 
+    int hint = delayEst->get_largest_delay() > 0
+      ? delayEst->get_largest_delay() : echo_delay + 2;
     if (!async) {
       // sync call
-      result = delayEst->process(echo_delay);
+      result = delayEst->process(hint);
     } else {
       // async call
       if (delayEst->get_near_samps() > NEAREND_SIZE) {
-        delayEst->process_async(echo_delay);
+        delayEst->process_async(hint);
       } else {
         D("near samps %d", delayEst->get_near_samps());
       }
@@ -563,10 +570,12 @@ void speex_ec_open (int sampleRate, int bufsize, int totalSize)
   den = speex_preprocess_state_init(bufsize, sampleRate);
   speex_echo_ctl(st, SPEEX_ECHO_SET_SAMPLING_RATE, &sampleRate);
   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_ECHO_STATE, st);
-  int value = 1;
-  //speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value);
-  //speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value);
-  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_DENOISE, &value);
+  int value_on = 1;
+  int value_off = 1;
+  //看不出AGC和VAD的效果
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value_off);
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value_off);
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_DENOISE, &value_off);
 }
 
 void speex_ec_close ()

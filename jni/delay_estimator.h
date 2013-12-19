@@ -25,6 +25,7 @@ class delay_estimator {
   int best_delay;
   int second_best_delay;
   int last_delay;
+  int largest_delay;
   int comp_times;
   bool processing; // is processing in progress?
   pthread_mutex_t process_lock;
@@ -51,6 +52,7 @@ class delay_estimator {
 
   int get_best_delay() { return best_delay <= 0 ? last_delay : best_delay; }
   int get_2nd_best_delay() { return second_best_delay; }
+  int get_largest_delay() { return largest_delay; }
   int get_best_quality() { return get_best_delay() >= 0 ? delay_quality[get_best_delay()] : 0; }
   int get_far_samps() { return total_far_samps; }
   int get_near_samps() { return total_near_samps; }

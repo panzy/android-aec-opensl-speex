@@ -112,7 +112,7 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
     }
 
     pos += FRAME_SAMPS * SEARCH_STEP;
-    usleep(2000); // 如果占用太多CPU资源，音频主线程可能受影响
+    //usleep(2000); // 如果占用太多CPU资源，会不会影响音频主线程？
   }
 
   // dump best result
@@ -153,7 +153,8 @@ delay_estimator::delay_estimator(int sr, int frame_samps, int max_delay, int nea
   total_near_samps(0),
   best_delay(-1),
   second_best_delay(-1),
-  last_delay(0),
+  last_delay(-1),
+  largest_delay(-1),
   comp_times(0),
   processing(false),
   async_hint(0),
@@ -336,6 +337,7 @@ int delay_estimator::process(int hint)
 
     // search from the |k|-th frame of |far| buffer
     int k = (pos_near - pos_far) / FRAME_SAMPS - hint;
+    k -= 2;
 
     if (hint <= 0 || k <= 0) {
         // search from the begining of |far| buffer
@@ -344,8 +346,11 @@ int delay_estimator::process(int hint)
         d = search_audio(far + k * FRAME_SAMPS, MAX_FAR_SAMPS - k * FRAME_SAMPS, near, MAX_NEAR_SAMPS, &quality);
         if (d >= 0) {
             d += k;
+            I("search_audio skip %d", k);
         } else {
-            d = search_audio(far, MAX_FAR_SAMPS - k * FRAME_SAMPS, near, MAX_NEAR_SAMPS, &quality);
+            d = search_audio(far, k * FRAME_SAMPS + MAX_NEAR_SAMPS, near, MAX_NEAR_SAMPS, &quality);
+            if (d >= 0)
+              I("search_audio skip failed, start from %d, got %d", k, d);
         }
     }
 
@@ -388,6 +393,10 @@ int delay_estimator::process(int hint)
 
             // record last delay
             last_delay = result;
+
+            // record largest delay
+            if (largest_delay < result)
+              largest_delay = result;
 
             ++succ_times;
         }
