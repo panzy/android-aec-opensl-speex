@@ -194,38 +194,43 @@ void close_dump_files()
   fd_farend = fd_farend2 = fd_nearend = fd_nearend2 = fd_echo = fd_send = NULL;
 }
 
-void start(jint track_min_buf_size, jint record_min_buf_size, jint playback_delay_ms)
+void start(jint track_min_buf_size, jint record_min_buf_size,
+    jint playback_delay_ms, jint echo_delay_ms)
 {
   playback_delay = playback_delay_ms / FRAME_MS;
 
-  //
-  // 估算回声延迟
-  //
-  // XXX 以下方法适用于 Huawei U8860 和 MOTO XOOM，但不适用于 Xiaomi 1S/2S。
-  //
-  // 观测数据
-  // ============================================================
-  // device       track(B)  record(B)   echo_delay(ms)
-  // ------------------------------------------------------------
-  // xiaomi 1s    870       640         340
-  // xiaomi 2s    1364      640         800
-  // hw u8860     870       4096        400
-  // xoom         1486      640         720
-  // htc          1486      8192        900
-  // ------------------------------------------------------------
-  //
-  // 经过测试，在满足以下条件的设备上——
-  // 1, track_min_buf_size = 870
-  // 2, record_min_buf_size = 4096
-  // 3, OpenSL buffer samples = 160
-  // 4, 主循环的 ahead 范围为 (20,60)ms ［TODO why would this matter ???]
-  // 5, [ in_buffer_cnt 和 out_buffer_cnt 对延迟没有影响 ]
-  // ——，回声延时大约为 20x20=400ms(+-40)，而延时是与 out_bufferframes 成正比的（参见
-  // AudioTrack::getMinFrameCount 的实现）
-  echo_delay = 18 * track_min_buf_size / 870;
-  // 延迟修正不足没关系，因为 speex AEC 模块有个 filter length 参数，初始化为
-  // 8xframe，但是修正过度就很严重，将完全不能消除回声。
-  echo_delay -= 2;
+  if (echo_delay_ms < 0) {
+    //
+    // 根据硬件参数估算回声延迟
+    //
+    // XXX 以下方法适用于 Huawei U8860 和 MOTO XOOM，但不适用于 Xiaomi 1S/2S。
+    //
+    // 观测数据
+    // ============================================================
+    // device       track(B)  record(B)   echo_delay(ms)
+    // ------------------------------------------------------------
+    // xiaomi 1s    870       640         340
+    // xiaomi 2s    1364      640         800
+    // hw u8860     870       4096        400
+    // xoom         1486      640         720
+    // htc          1486      8192        900
+    // ------------------------------------------------------------
+    //
+    // 经过测试，在满足以下条件的设备上——
+    // 1, track_min_buf_size = 870
+    // 2, record_min_buf_size = 4096
+    // 3, OpenSL buffer samples = 160
+    // 4, 主循环的 ahead 范围为 (20,60)ms ［TODO why would this matter ???]
+    // 5, [ in_buffer_cnt 和 out_buffer_cnt 对延迟没有影响 ]
+    // ——，回声延时大约为 20x20=400ms(+-40)，而延时是与 out_bufferframes 成正比的（参见
+    // AudioTrack::getMinFrameCount 的实现）
+    echo_delay = 18 * track_min_buf_size / 870;
+    // 延迟修正不足没关系，因为 speex AEC 模块有个 filter length 参数，初始化为
+    // 8xframe，但是修正过度就很严重，将完全不能消除回声。
+    echo_delay -= 2;
+  } else {
+    echo_delay = echo_delay_ms / FRAME_MS;
+  }
 
   const int sample_size = sizeof(short);
   in_buffer_cnt = ceil((float)record_min_buf_size / sample_size / FRAME_SAMPS);
@@ -430,6 +435,11 @@ void runNearendProcessing()
   cleanup();
 }
 
+int get_estimated_echo_delay()
+{
+  return echo_delay2 >= 0 ? echo_delay2 * FRAME_MS : -1;
+}
+
 void stop()
 {
   on = 0;
@@ -575,11 +585,6 @@ int push(JNIEnv *env, jshortArray farend)
   int rtn = write_circular_buffer(farend_buf, _farend, samps);
   env->ReleaseShortArrayElements(farend, _farend, 0);
   return rtn;
-}
-
-double getTimestamp()
-{
-  return android_GetTimestamp(p);
 }
 
 void speex_ec_open (int sampleRate, int bufsize, int totalSize)

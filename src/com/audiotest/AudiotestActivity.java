@@ -31,6 +31,7 @@ package com.audiotest;
 
 import android.annotation.TargetApi;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.media.AudioFormat;
@@ -167,7 +168,9 @@ public class AudiotestActivity extends Activity {
         };
 
         if (true) {
-            opensl_example.start(track_minbufsz, record_minbufsz, playback_delay);
+
+            int echo_delay_ms = getSharedPreferences("aec", 0).getInt("echo_delay_ms", -1);
+            opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms);
             thread.start();
             thread2.start();
             //thread3.start();
@@ -202,6 +205,12 @@ public class AudiotestActivity extends Activity {
     public void onDestroy(){
     	
     	super.onDestroy();
+
+        int echo_delay_ms = opensl_example.get_estimated_echo_delay();
+        SharedPreferences.Editor edt = getSharedPreferences("aec", 0).edit();
+        edt.putInt("echo_delay_ms", echo_delay_ms);
+        edt.commit();
+
     	opensl_example.stop();
     	try {
             thread2.interrupt();

@@ -35,7 +35,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *  Byte order = Little-endian
  *  Channels = 1
  *
- * @param playback_delay_
+ * @param playback_delay_ms 指示延迟播放
+ * @param echo_delay_ms 提供一个关于回声延迟的参考
  *
  * 延迟播放
  *
@@ -47,7 +48,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * AEC 主线程遇到 FAREND_BUFFER underrun 会自动补充静音帧，AEC 模块无需区分输入
  * 给它的 farend 是原样的还是经过underrun修正的。
  * */
-void start(jint audio_track_min_buf_size, jint audio_record_min_buf_size, jint playback_delay_ms);
+void start(jint audio_track_min_buf_size, jint audio_record_min_buf_size,
+    jint playback_delay_ms, jint echo_delay_ms);
 /* 持续处理录音。*/
 void runNearendProcessing();
 /* 结束播放和录音。*/
@@ -61,4 +63,8 @@ int push(JNIEnv *env, jshortArray buf);
  * return: 0 or buf.len */
 int pull(JNIEnv *env, jshortArray buf);
 int estimate_delay(int async);
-double getTimestamp();
+/* 获取动态评估的回声延迟。
+ * 请在 runNearendProcessing() 结束后调用。
+ * return echo delay in ms, -1 if the value is unavailable.
+ * */
+int get_estimated_echo_delay();
