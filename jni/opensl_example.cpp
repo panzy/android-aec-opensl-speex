@@ -259,6 +259,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
 
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
 
+  close_dump_files(); // 假如上次运行后没有干净地结束
   open_dump_files("w+");
   on = 1;
   t_start = timestamp(0);
