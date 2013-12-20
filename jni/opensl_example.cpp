@@ -37,8 +37,8 @@
 #define WEBRTC_HISTORY_SIZE ((1500 / 1000) * SR * SAMPLE_SIZE)
 
 const int MAX_DELAY = 50;
-const int NEAREND_SIZE = 10;
-const int DELAY_EST_MIN_SUCC = 4;
+const int NEAREND_SIZE = 50; // 太短可能会得到完全错误的结果（取决于实际输入）
+const int DELAY_EST_MIN_SUCC = 15; // 负数表示无限
 // 回声延迟（以frame为单位）的有效值 >= 0，下面是几个特殊的无效值
 const int ECHO_DELAY_NULL = -1;
 const int ECHO_DELAY_FAILED = -2;
@@ -478,6 +478,10 @@ int estimate_delay(int async)
 
     delayEst->add_near(near, FRAME_SAMPS);
 
+    // 减少搜索次数，希望不会影响结果的正确性
+    if (i % 2 == 0)
+      continue;
+
     int hint = delayEst->get_largest_delay() > 0
       ? delayEst->get_largest_delay() : echo_delay + 2;
     if (!async) {
@@ -493,9 +497,12 @@ int estimate_delay(int async)
       usleep(FRAME_MS * 1000);
     }
 
-    if ((result >= 0 || (result = delayEst->get_best_delay()) >= 0)
+    if (DELAY_EST_MIN_SUCC >= 0
+        && (result >= 0 || (result = delayEst->get_best_delay()) >= 0)
         && delayEst->succ_times > DELAY_EST_MIN_SUCC) {
-      break;
+      // 输出一次结果，但不放弃搜索
+      echo_delay2 = result - 2;
+      //break;
     }
   }
 
