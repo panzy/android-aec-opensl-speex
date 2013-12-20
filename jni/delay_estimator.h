@@ -68,6 +68,7 @@ class delay_estimator {
   void echo_cancel(short *in, short *ref, int samps,
       short *out, float *cancellation_ratio);
   int search_audio(short *haystack, int haystack_samps, short *needle, int needle_samps, float *quality);
+  int score_delay(int delay);
 
   // treat |dst| array as a FIFO queue.
   // return shorts been pushed |n|.

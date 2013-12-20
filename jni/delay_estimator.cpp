@@ -381,14 +381,13 @@ int delay_estimator::process(int hint)
             }
 
             // record best delay
-            if (best_delay != result
-                && 2 <= delay_hits[result]
-                && delay_quality[best_delay] < quality) {
-              second_best_delay = best_delay;
-                best_delay = result;
-
-                D("refresh best result: delay %d, quality %0.2f, hits : %d, compare times: %d",
-                        result, delay_quality[result], delay_hits[result], comp_times);
+            if (best_delay < 0
+                || (best_delay != result
+                  && score_delay(best_delay) < score_delay(result)))
+            {
+              best_delay = result;
+              D("refresh best result: delay %d, quality %0.2f, hits : %d, compare times: %d",
+                  result, delay_quality[result], delay_hits[result], comp_times);
             }
 
             // record last delay
@@ -402,7 +401,7 @@ int delay_estimator::process(int hint)
         }
     }
 
-    I("process done, (%d,%d~%d,%d~%d), result(best/curr) %d/%d, q %0.2f/%0.2f, %dms",
+    I("process done, (%d,%d~%d,%d~%d), result(best/curr) %d/%d, q %0.2f/%0.2f, hit %d/%d, %dms",
         hint,
         pos_near / FRAME_SAMPS,
         total_near_samps_ / FRAME_SAMPS,
@@ -412,6 +411,8 @@ int delay_estimator::process(int hint)
         result,
         best_delay < 0 ? 0 : delay_quality[best_delay],
         result < 0 ? 0 : delay_quality[result],
+        delay_hits[best_delay],
+        delay_hits[result],
         (int)timestamp(t0));
 
     // set |processing| as false
@@ -426,4 +427,9 @@ int delay_estimator::process(int hint)
   }
 
   return best_delay;
+}
+
+int delay_estimator::score_delay(int delay)
+{
+  return delay_quality[delay] * 100 + delay_hits[delay]; 
 }
