@@ -151,7 +151,10 @@ int64_t timestamp(int64_t base)
 void fwrite_samps(short *frame, FILE *fd, int samps)
 {
   if (fd) {
-    fwrite(frame, samps, 2, fd);
+    int n = fwrite(frame, samps, 2, fd);
+    if (2 != n) {
+      E("fwrite failed, return value = %d(expect 2), errno %d", n, errno);
+    }
   }
 }
 
@@ -193,6 +196,7 @@ void close_dump_files()
     fclose(fd_send);
 #endif
   fd_farend = fd_farend2 = fd_nearend = fd_nearend2 = fd_echo = fd_send = NULL;
+  I("dump files closed");
 }
 
 void start(jint track_min_buf_size, jint record_min_buf_size,
@@ -323,9 +327,9 @@ void runNearendProcessing()
     ++loop_idx;
 
     // estimate echo delay
-    if (echo_delay2 == ECHO_DELAY_NULL && loop_idx > playback_delay + MAX_DELAY * 5) {
+    if (echo_delay2 == ECHO_DELAY_NULL && rendered_samps > FRAME_SAMPS * (playback_delay + MAX_DELAY * 5)) {
       if (delay_est_thrd_stopped) {
-        D("start estimate_delay ");
+        I("start estimate_delay ");
         // XXX 关闭文件，否则 estimate_delay() 会阻塞在 fopen() 上。 
         fclose(fd_farend2);
         fclose(fd_nearend2);
@@ -460,6 +464,7 @@ void cleanup()
     delete delayEst;
     delayEst = NULL;
   }
+  I("clean up");
 }
 
 int estimate_delay(int async)
