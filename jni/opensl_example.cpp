@@ -108,6 +108,7 @@ short silence[FRAME_SAMPS];
 int playback_delay = 0; // samps
 int echo_delay = ECHO_DELAY_NULL; // samps, relative to playback
 int echo_delay2 = ECHO_DELAY_NULL; // samps, relative to playback, estimated by WebRtc 
+bool echo_delay2_desired = false;
 int in_buffer_cnt = 0;
 int out_buffer_cnt = 0;
 
@@ -198,7 +199,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
     jint playback_delay_ms, jint echo_delay_ms)
 {
   playback_delay = playback_delay_ms / FRAME_MS;
-
+  echo_delay2_desired = echo_delay_ms < 0;
   if (echo_delay_ms < 0) {
     //
     // 根据硬件参数估算回声延迟
@@ -507,12 +508,11 @@ int estimate_delay(int async)
       usleep(FRAME_MS * 1000);
     }
 
-    if (DELAY_EST_MIN_SUCC >= 0
+    // 刷新输出结果，但不放弃搜索
+    if (echo_delay2_desired && DELAY_EST_MIN_SUCC >= 0
         && (result >= 0 || (result = delayEst->get_best_delay()) >= 0)
         && delayEst->succ_times > DELAY_EST_MIN_SUCC) {
-      // 输出一次结果，但不放弃搜索
       echo_delay2 = result - 2;
-      //break;
     }
   }
 
