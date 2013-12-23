@@ -359,7 +359,7 @@ void runNearendProcessing()
     //
     int lack_cap_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - captured_samps;
     if (lack_cap_samps > FRAME_SAMPS * 2) {
-      E("record overrun, lack_cap_samps %d", lack_cap_samps);
+      D("record overrun, lack_cap_samps %d", lack_cap_samps);
     }
     while (lack_cap_samps >= FRAME_SAMPS) {
       int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
@@ -402,10 +402,10 @@ void runNearendProcessing()
           // do AEC
           speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
           speex_preprocess_run(den, processedbuffer);
-          out = processedbuffer;
           DUMP_SAMPS(inbuffer, fd_nearend, samps);
           DUMP_SAMPS(refbuf, fd_echo, samps);
-          DUMP_SAMPS(out, fd_send, samps);
+          DUMP_SAMPS(processedbuffer, fd_send, samps);
+          out = processedbuffer;
         }
         // output
         write_circular_buffer(nearend_buf, out, samps);
@@ -591,8 +591,9 @@ void speex_ec_open (int sampleRate, int bufsize, int totalSize)
   speex_echo_ctl(st, SPEEX_ECHO_SET_SAMPLING_RATE, &sampleRate);
   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_ECHO_STATE, st);
   int value_on = 1;
-  int value_off = 1;
-  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value_on);
+  int value_off = 0;
+  // AGC 会让回声变得模糊、放大。
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value_off);
   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value_on);
   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_DENOISE, &value_on);
 }
