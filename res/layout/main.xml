@@ -2,11 +2,44 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="fill_parent"
     android:layout_height="fill_parent"
-    android:orientation="vertical" >
+    android:orientation="vertical">
 
-    <TextView
-        android:layout_width="fill_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/hello" />
+	<Button
+		android:layout_width="fill_parent"
+		android:layout_height="wrap_content"
+		android:text="Record"
+		android:id="@+id/btn_play_record"/>
 
+	<Button
+		android:layout_width="fill_parent"
+		android:layout_height="wrap_content"
+		android:text="Playback Far-end"
+		android:id="@+id/btn_play_far"
+		/>
+
+	<Button
+		android:layout_width="fill_parent"
+		android:layout_height="wrap_content"
+		android:text="Playback Near-end"
+		android:id="@+id/btn_play_near"
+		android:layout_gravity="center_horizontal"/>
+
+	<Button
+		android:layout_width="fill_parent"
+		android:layout_height="wrap_content"
+		android:text="Playback Send"
+		android:id="@+id/btn_play_send"
+		android:layout_gravity="center_horizontal"/>
+
+	<Button
+		android:layout_width="fill_parent"
+		android:layout_height="wrap_content"
+		android:text="Offline Echo Cancellation"
+		android:id="@+id/btn_offline_aec"/>
+
+	<Button
+		android:layout_width="fill_parent"
+		android:layout_height="wrap_content"
+		android:text="Offline Delay Estimation"
+		android:id="@+id/btn_offline_est"/>
 </LinearLayout>

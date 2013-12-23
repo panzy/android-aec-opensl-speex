@@ -53,7 +53,7 @@ const int ECHO_DELAY_FAILED = -2;
 
 #define TAG "aec" // log tag
 
-#define DUMP_RAW 0
+#define DUMP_RAW 1
 #if DUMP_RAW
 #define DUMP_SAMPS(p,f,n) fwrite_samps(p,f,n)
 #else
@@ -208,19 +208,6 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
     //
     // 根据硬件参数估算回声延迟
     //
-    // XXX 以下方法适用于 Huawei U8860 和 MOTO XOOM，但不适用于 Xiaomi 1S/2S。
-    //
-    // 观测数据
-    // ============================================================
-    // device       track(B)  record(B)   echo_delay(ms)
-    // ------------------------------------------------------------
-    // xiaomi 1s    870       640         340
-    // xiaomi 2s    1364      640         800
-    // hw u8860     870       4096        400
-    // xoom         1486      640         720
-    // htc          1486      8192        900
-    // ------------------------------------------------------------
-    //
     // 经过测试，在满足以下条件的设备上——
     // 1, track_min_buf_size = 870
     // 2, record_min_buf_size = 4096
@@ -233,8 +220,10 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
     // 延迟修正不足没关系，因为 speex AEC 模块有个 filter length 参数，初始化为
     // 8xframe，但是修正过度就很严重，将完全不能消除回声。
     echo_delay -= 2;
+    echo_delay2 = ECHO_DELAY_NULL; // 要求动态评估
   } else {
     echo_delay = echo_delay_ms / FRAME_MS;
+    echo_delay2 = echo_delay;
   }
 
   const int sample_size = sizeof(short);
@@ -267,7 +256,6 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
   open_dump_files("w+");
   on = 1;
   t_start = timestamp(0);
-  echo_delay2 = ECHO_DELAY_NULL; // 每次都重新评估
   delay_est_thrd_stopped = true;
 
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
@@ -327,15 +315,20 @@ void runNearendProcessing()
     ++loop_idx;
 
     // estimate echo delay
-    if (echo_delay2 == ECHO_DELAY_NULL && rendered_samps > FRAME_SAMPS * (playback_delay + MAX_DELAY * 5)) {
-      if (delay_est_thrd_stopped) {
-        I("start estimate_delay ");
-        // XXX 关闭文件，否则 estimate_delay() 会阻塞在 fopen() 上。 
+    if (rendered_samps > FRAME_SAMPS * (playback_delay + MAX_DELAY * 5)) {
+      // XXX 关闭文件，否则 estimate_delay() 会阻塞在 fopen() 上。 
+      if (fd_farend2)
         fclose(fd_farend2);
+      if (fd_nearend2)
         fclose(fd_nearend2);
-        fd_farend2 = fd_nearend2 = NULL;
-        delay_est_thrd_stopped = false;
-        pthread_create(&delay_est_thrd, NULL, (void* (*)(void*))estimate_delay, 0);
+      fd_farend2 = fd_nearend2 = NULL;
+
+      if (echo_delay2 == ECHO_DELAY_NULL) {
+        if (delay_est_thrd_stopped) {
+          I("start estimate_delay ");
+          delay_est_thrd_stopped = false;
+          pthread_create(&delay_est_thrd, NULL, (void* (*)(void*))estimate_delay, 0);
+        }
       }
     }
 
@@ -375,56 +368,64 @@ void runNearendProcessing()
     //
     // record
     //
-    int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
-    if (samps == FRAME_SAMPS) {
-      if (captured_samps == 0) 
-        D("first time of capture at @%"PRId64"ms", timestamp(t0));
-      captured_samps += samps;
+    int lack_cap_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - captured_samps;
+    if (lack_cap_samps > FRAME_SAMPS * 2) {
+      E("record overrun, lack_cap_samps %d", lack_cap_samps);
+    }
+    while (lack_cap_samps >= FRAME_SAMPS) {
+      int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
+      if (samps == FRAME_SAMPS) {
+        if (captured_samps == 0) 
+          D("first time of capture at @%"PRId64"ms", timestamp(t0));
+        captured_samps += samps;
+        lack_cap_samps -= samps;
 
-      // adjust echo buffer, and read a frame for current AEC
-      if (echo_delay2 >= 0 && echo_delay2 != echo_delay) {
-        I("adjust echo buffer: %d=>%d", echo_delay, echo_delay2);
-        if (echo_delay >= 0) {
-          if (echo_delay2 > echo_delay + 2) {
-            for (int i = 0, n = echo_delay2 - echo_delay; i < n; ++i) {
-              write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
+        // adjust echo buffer, and read a frame for current AEC
+        if (echo_delay2 >= 0 && echo_delay2 != echo_delay) {
+          I("adjust echo buffer: %d=>%d", echo_delay, echo_delay2);
+          if (echo_delay >= 0) {
+            if (echo_delay2 > echo_delay + 2) {
+              for (int i = 0, n = echo_delay2 - echo_delay; i < n; ++i) {
+                write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
+              }
+            } else {
+              // shift some frames
+              for(int i = 0, n = echo_delay - echo_delay2; i < n; ++i) {
+                read_circular_buffer(echo_buf, refbuf, samps);
+              }
             }
           } else {
-            // shift some frames
-            for(int i = 0, n = echo_delay - echo_delay2; i < n; ++i) {
-              read_circular_buffer(echo_buf, refbuf, samps);
+            for (int i = 0, n = echo_delay2; i < n; ++i) {
+              write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
             }
           }
-        } else {
-          for (int i = 0, n = echo_delay2; i < n; ++i) {
-            write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
-          }
+          // reopen speex
+          speex_ec_close();
+          speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
+          echo_delay = echo_delay2;
         }
-        // reopen speex
-        speex_ec_close();
-        speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
-        echo_delay = echo_delay2;
-      }
-      read_circular_buffer(echo_buf, refbuf, samps);
+        read_circular_buffer(echo_buf, refbuf, samps);
 
-      short *out = inbuffer; // output(send) frame
-      if (loop_idx < playback_delay + echo_delay || echo_delay <= 0) {
-        // output as-is
+        short *out = inbuffer; // output(send) frame
+        if (loop_idx < playback_delay + echo_delay || echo_delay <= 0) {
+          // output as-is
+        } else {
+          // do AEC
+          speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
+          speex_preprocess_run(den, processedbuffer);
+          out = processedbuffer;
+          DUMP_SAMPS(inbuffer, fd_nearend, samps);
+          DUMP_SAMPS(refbuf, fd_echo, samps);
+          DUMP_SAMPS(out, fd_send, samps);
+        }
+        // output
+        write_circular_buffer(nearend_buf, out, samps);
+        if (captured_samps > playback_delay * FRAME_SAMPS && fd_nearend2)
+          fwrite_samps(inbuffer, fd_nearend2, samps);
       } else {
-        // do AEC
-        speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
-        speex_preprocess_run(den, processedbuffer);
-        out = processedbuffer;
+        D("record nothing at @%"PRId64"ms", timestamp(t0));
+        break;
       }
-      // output
-      write_circular_buffer(nearend_buf, out, samps);
-      DUMP_SAMPS(inbuffer, fd_nearend, samps);
-      if (captured_samps > playback_delay * FRAME_SAMPS && fd_nearend2)
-        fwrite_samps(inbuffer, fd_nearend2, samps);
-      DUMP_SAMPS(refbuf, fd_echo, samps);
-      DUMP_SAMPS(out, fd_send, samps);
-    } else {
-      D("record nothing at @%"PRId64"ms", timestamp(t0));
     }
 
     // log time elapse
@@ -619,3 +620,36 @@ void speex_ec_close ()
   }
 }
 
+void offline_process()
+{
+  const int NN = 160;
+  const int TAIL = NN * 8;
+   FILE *echo_fd, *ref_fd, *e_fd;
+   short echo_buf[NN], ref_buf[NN], e_buf[NN];
+   SpeexEchoState *st;
+   SpeexPreprocessState *den;
+   int sampleRate = 8000;
+
+   ref_fd  = fopen("sdcard/tmp/near.raw", "rb");
+   echo_fd = fopen("sdcard/tmp/echo.raw", "rb");
+   e_fd    = fopen("sdcard/tmp/send.raw", "wb");
+
+   st = speex_echo_state_init(NN, TAIL);
+   den = speex_preprocess_state_init(NN, sampleRate);
+   speex_echo_ctl(st, SPEEX_ECHO_SET_SAMPLING_RATE, &sampleRate);
+   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_ECHO_STATE, st);
+
+   while (!feof(ref_fd) && !feof(echo_fd))
+   {
+      fread(ref_buf, sizeof(short), NN, ref_fd);
+      fread(echo_buf, sizeof(short), NN, echo_fd);
+      speex_echo_cancellation(st, ref_buf, echo_buf, e_buf);
+      speex_preprocess_run(den, e_buf);
+      fwrite(e_buf, sizeof(short), NN, e_fd);
+   }
+   speex_echo_state_destroy(st);
+   speex_preprocess_state_destroy(den);
+   fclose(e_fd);
+   fclose(echo_fd);
+   fclose(ref_fd);
+}

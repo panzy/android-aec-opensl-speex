@@ -39,7 +39,10 @@ import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.os.Build;
+import android.os.Environment;
 import android.util.Log;
+import android.view.View;
+import android.widget.Button;
 import opensl_example.opensl_example;
 import android.app.Activity;
 import android.os.Bundle;
@@ -50,25 +53,67 @@ import java.nio.ByteOrder;
 
 import static android.os.Build.VERSION_CODES.*;
 
-public class AudiotestActivity extends Activity {
+public class AudiotestActivity extends Activity implements View.OnClickListener {
+    private static final String output_dir = Environment.getExternalStorageDirectory()
+            + "/tmp";
+    private static final String far_filename = output_dir + "/far.raw";
+    private static final String near_filename = output_dir + "/near.raw";
+    private static final String echo_filename = output_dir + "/echo.raw";
+    private static final String send_filename = output_dir + "/send.raw";
+
     private static final String TAG = "java";
     private static final int SR = 8000; // sample rate
     private static final int FRAME_SAMPS = 320; // samples per frame
     private static final int FRAME_MS = 1000 * FRAME_SAMPS / SR; // ms
     private static final int playback_delay = 300; // ms
 
-    /** Called when the activity is first created. */
 	Thread thread;
     Thread thread2;
     Thread thread3;
+
+    private boolean isPlaying = false;
+
+    int sampleRate = 8000;
+    int managerBufferSize = 2000;
+    // frame_size is the amount of data (in samples) you want to
+    // process at once and filter_length is the length (in samples)
+    // of the echo cancelling filter you want to use (also known as
+    // tail length). It is recommended to use a frame size in the
+    // order of 20 ms (or equal to the codec frame size) and make
+    // sure it is easy to perform an FFT of that size (powers of two
+    // are better than prime sizes). The recommended tail length is
+    // approximately the third of the room reverberation time. For
+    // example, in a small room, reverberation time is in the order
+    // of 300 ms, so a tail length of 100 ms is a good choice (800
+    // samples at 8000 Hz sampling rate).
+    final static int frameMs = 20; // frame duration
+    final static int frameRate = 1000 / frameMs;
+    int frameSize = sampleRate * 20 / 1000;
+    int filterLength = frameSize * 16;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
 
-        int track_minbufsz = AudioTrack.getMinBufferSize(8000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        checkAudioLowLatencyFeature();
+
+        querySampleRate();
+
+        findViewById(R.id.btn_play_record).setOnClickListener(this);
+        findViewById(R.id.btn_play_far).setOnClickListener(this);
+        findViewById(R.id.btn_play_near).setOnClickListener(this);
+        findViewById(R.id.btn_play_send).setOnClickListener(this);
+        findViewById(R.id.btn_offline_aec).setOnClickListener(this);
+        findViewById(R.id.btn_offline_est).setOnClickListener(this);
+    }
+
+    private void play_record_aec_start() {
+        int track_minbufsz = AudioTrack.getMinBufferSize(8000,
+                AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
         Log.d(TAG, "AudioTrack.getMinBufferSize " + track_minbufsz);
-        int record_minbufsz = AudioRecord.getMinBufferSize(8000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        int record_minbufsz = AudioRecord.getMinBufferSize(8000,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         Log.d(TAG, "AudioRecord.getMinBufferSize " + record_minbufsz);
 
         thread = new Thread() {
@@ -132,7 +177,7 @@ public class AudiotestActivity extends Activity {
                     AudiotestActivity.this.runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            AudiotestActivity.this.finish();
+                            play_record_aec_stop();
                         }
                     });
                 } catch (FileNotFoundException e) {
@@ -167,20 +212,40 @@ public class AudiotestActivity extends Activity {
             }
         };
 
-        if (true) {
+        int echo_delay_ms = getSharedPreferences("aec", 0).getInt("echo_delay_ms", -1);
+        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms);
+        thread.start();
+        thread2.start();
+        //thread3.start();
+    }
 
-            int echo_delay_ms = getSharedPreferences("aec", 0).getInt("echo_delay_ms", -1);
-            opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms);
-            thread.start();
-            thread2.start();
-            //thread3.start();
-        } else {
-            opensl_example.estimate_delay(0);
+    private void play_record_aec_stop() {
+        saveDelay();
+
+        opensl_example.stop();
+        try {
+            if (thread2 != null && thread2.isAlive()) {
+                thread2.interrupt();
+            }
+            if (thread3 != null && thread3.isAlive()) {
+                thread3.interrupt();
+            }
+            if (thread != null && thread.isAlive()) {
+                thread.join();
+            }
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
+        thread = null;
+        thread2 = null;
+        thread3 = null;
+    }
 
-        checkAudioLowLatencyFeature();
-
-        querySampleRate();
+    private void saveDelay() {
+        int echo_delay_ms = opensl_example.get_estimated_echo_delay();
+        SharedPreferences.Editor edt = getSharedPreferences("aec", 0).edit();
+        edt.putInt("echo_delay_ms", echo_delay_ms);
+        edt.commit();
     }
 
     @TargetApi(JELLY_BEAN_MR1)
@@ -203,24 +268,88 @@ public class AudiotestActivity extends Activity {
     }
 
     public void onDestroy(){
-    	
     	super.onDestroy();
-
-        int echo_delay_ms = opensl_example.get_estimated_echo_delay();
-        SharedPreferences.Editor edt = getSharedPreferences("aec", 0).edit();
-        edt.putInt("echo_delay_ms", echo_delay_ms);
-        edt.commit();
-
-    	opensl_example.stop();
-    	try {
-            thread2.interrupt();
-            thread3.interrupt();
-			thread.join();
-		} catch (InterruptedException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-    	thread = null;
-        thread2 = null;
+        play_record_aec_stop();
     }
+
+    @Override
+    public void onClick(View view) {
+        switch(view.getId()) {
+            case R.id.btn_play_record:
+                if (thread == null) {
+                    play_record_aec_start();
+                } else {
+                    play_record_aec_stop();
+                }
+                break;
+            case R.id.btn_play_far:
+                onPlay((Button)(findViewById(R.id.btn_play_far)), far_filename);
+                break;
+            case R.id.btn_play_near:
+                onPlay((Button)(findViewById(R.id.btn_play_near)), near_filename);
+                break;
+            case R.id.btn_play_send:
+                onPlay((Button)(findViewById(R.id.btn_play_send)), send_filename);
+                break;
+            case R.id.btn_offline_est:
+                opensl_example.estimate_delay(0);
+                saveDelay();
+                break;
+            case R.id.btn_offline_aec:
+            {
+                long t = System.currentTimeMillis();
+                opensl_example.offline_process();
+                Log.i(TAG, "offline process, elapse " + (System.currentTimeMillis() - t) + "ms");
+            }
+                break;
+        }
+    }
+
+    private void play(String filename) {
+        AudioTrack player = new AudioTrack(AudioManager.STREAM_MUSIC,
+                sampleRate,
+                AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                managerBufferSize, AudioTrack.MODE_STREAM);
+        player.play();
+
+        try {
+            FileInputStream fis = new FileInputStream(filename);
+            byte[] buf = new byte[managerBufferSize];
+            while(isPlaying) {
+                int n = fis.read(buf);
+                if (n <= 0)
+                    break;
+                player.write(buf, 0, n);
+            };
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void onPlay(final Button btn, final String filename) {
+        if (isPlaying) {
+            isPlaying = false;
+            return;
+        }
+
+        final String origTxt = btn.getText().toString();
+        btn.setText("Playing ...");
+        isPlaying = true;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                play(filename);
+                isPlaying = false;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        btn.setText(origTxt);
+                    }
+                });
+            }
+        }).start();
+    }
+
 }

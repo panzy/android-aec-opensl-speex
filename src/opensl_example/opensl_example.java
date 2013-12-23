@@ -37,4 +37,8 @@ public class opensl_example {
     return opensl_exampleJNI.get_estimated_echo_delay();
   }
 
+  public static void offline_process() {
+    opensl_exampleJNI.offline_process();
+  }
+
 }

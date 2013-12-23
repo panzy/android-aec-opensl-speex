@@ -28,4 +28,5 @@ public class opensl_exampleJNI {
   public final static native int pull(short[] jarg2);
   public final static native int estimate_delay(int jarg1);
   public final static native int get_estimated_echo_delay();
+  public final static native void offline_process();
 }

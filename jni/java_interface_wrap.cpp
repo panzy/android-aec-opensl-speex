@@ -310,6 +310,13 @@ SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_get_1estimated_1
 }
 
 
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_offline_1process(JNIEnv *jenv, jclass jcls) {
+  (void)jenv;
+  (void)jcls;
+  offline_process();
+}
+
+
 #ifdef __cplusplus
 }
 #endif

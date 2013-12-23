@@ -68,3 +68,7 @@ int estimate_delay(int async);
  * return echo delay in ms, -1 if the value is unavailable.
  * */
 int get_estimated_echo_delay();
+/* 处理离线文件：
+ * near.raw + echo.raw => send.raw
+ */
+void offline_process();
