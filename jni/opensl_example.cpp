@@ -114,27 +114,14 @@ int out_buffer_cnt = 0;
 
 //----------------------------------------------------------------------
 
-void align_farend_buf(int n) {
+// fill_with - a frame to fill with.
+void align_farend_buf(int n, short *fill_with) {
   while (n > 0) {
     if (n <= FRAME_SAMPS) {
-      playback(silence, n, true);
+      playback(fill_with, n, true);
       n = 0;
     } else {
-      playback(silence, FRAME_SAMPS, true);
-      n -= FRAME_SAMPS;
-    }
-  }
-}
-
-void align_nearend_buf(int n) {
-  while (n > 0) {
-    if (n <= FRAME_SAMPS) {
-      write_circular_buffer(nearend_buf, silence, n);
-      DUMP_SAMPS(silence, fd_nearend, n);
-      n = 0;
-    } else {
-      write_circular_buffer(nearend_buf, silence, FRAME_SAMPS);
-      DUMP_SAMPS(silence, fd_nearend, FRAME_SAMPS);
+      playback(fill_with, FRAME_SAMPS, true);
       n -= FRAME_SAMPS;
     }
   }
@@ -267,6 +254,7 @@ void runNearendProcessing()
   short inbuffer[FRAME_SAMPS]; // record
   short refbuf[FRAME_SAMPS];
   short processedbuffer[FRAME_SAMPS];
+  short render_buf[FRAME_SAMPS];
 
   // delay echo_buf (relative to farend_buf)
   if (echo_delay > 0) {
@@ -339,9 +327,9 @@ void runNearendProcessing()
       playback(silence, FRAME_SAMPS, false);
       rendered_samps += FRAME_SAMPS;
     } else {
-      int samps = read_circular_buffer(farend_buf, inbuffer, FRAME_SAMPS);
+      int samps = read_circular_buffer(farend_buf, render_buf, FRAME_SAMPS);
       if (samps > 0) {
-        playback(inbuffer, samps, true);
+        playback(render_buf, samps, true);
         rendered_samps += samps;
       }
       // pad underrun with silence
@@ -350,7 +338,8 @@ void runNearendProcessing()
       lack_samps += 2 * FRAME_SAMPS; // 不但不应该紧缺，还应该有点富余
       if (lack_samps > 0) {
         D("playback underrun, lack of %d samps", lack_samps);
-        align_farend_buf(lack_samps);
+        // 如果用静音帧来补充，会有破音，进而对录音和回声消除产生严重影响
+        align_farend_buf(lack_samps, render_buf);
         rendered_samps += lack_samps;
       }
     }
