@@ -190,9 +190,14 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
     jint playback_delay_ms, jint echo_delay_ms)
 {
   playback_delay = playback_delay_ms / FRAME_MS;
+  //
+  // 设置变量：
+  // - echo_delay 立即用于AEC
+  // - echo_delay2 要么为 NULL 要么为 echo_delay，若为前者，
+  //    runNearendProcessing() 将创建一个线程来运行 estimate_delay()。
+  //    一旦 echo_delay2 被计算出来，就会用来修正 echo_delay。
   echo_delay2_desired = echo_delay_ms < 0;
   if (echo_delay_ms < 0) {
-    //
     // 根据硬件参数估算回声延迟
     //
     // 经过测试，在满足以下条件的设备上——
@@ -210,7 +215,8 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
     echo_delay2 = ECHO_DELAY_NULL; // 要求动态评估
   } else {
     echo_delay = echo_delay_ms / FRAME_MS;
-    echo_delay2 = echo_delay;
+    //echo_delay2 = echo_delay;
+    echo_delay2 = ECHO_DELAY_NULL; // 要求动态评估
   }
 
   const int sample_size = sizeof(short);
@@ -218,7 +224,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
   out_buffer_cnt = ceil((float)track_min_buf_size / sample_size / FRAME_SAMPS);
 
   // 太小的 out_buffer_cnt （比如3） 不足以保证流畅的播放。
-  const int min_buffer_cnt = 20;
+  const int min_buffer_cnt = 30;
   if (out_buffer_cnt < min_buffer_cnt) out_buffer_cnt = min_buffer_cnt;
   // 尚未观测到 in_buffer_cnt 太小的直接影响，不过为了简化主循环中控制 ahead 时
   // 间的逻辑，这里也强制 in_buffer_cnt 不小于一个阈值。
@@ -279,8 +285,8 @@ void runNearendProcessing()
   //
   // 把时间提前量定义为
   //    ahead = 物理时长 - 已处理的音频的时长
-  int max_ahead = out_buffer_cnt / 2 * FRAME_MS;
-  int min_ahead = std::max(max_ahead / 2, 1);
+  int max_ahead = (int)(out_buffer_cnt * 3 / 4) * FRAME_MS;
+  int min_ahead = max_ahead - 5 * FRAME_MS;// std::max(max_ahead / 2, 5 * FRAME_MS);
   I("main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
       min_ahead, max_ahead, min_ahead / FRAME_MS, max_ahead / FRAME_MS);
 
