@@ -344,8 +344,9 @@ void runNearendProcessing()
       lack_samps += 2 * FRAME_SAMPS; // 不但不应该紧缺，还应该有点富余
       if (lack_samps > 0) {
         D("playback underrun, lack of %d samps", lack_samps);
-        // 如果用静音帧来补充，会有破音，进而对录音和回声消除产生严重影响
-        align_farend_buf(lack_samps, render_buf);
+        // 如果用静音帧来补充，会有破音，进而对录音和回声消除产生严重影响，
+        // 但是如果用上一帧补充，有可能产生音量很大的嗡鸣，更坏。
+        align_farend_buf(lack_samps, silence);
         rendered_samps += lack_samps;
       }
     }
