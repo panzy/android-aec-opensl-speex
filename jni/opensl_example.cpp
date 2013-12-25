@@ -42,14 +42,8 @@ const int DELAY_EST_MIN_SUCC = 15; // 负数表示无限
 // 回声延迟（以frame为单位）的有效值 >= 0，下面是几个特殊的无效值
 const int ECHO_DELAY_NULL = -1;
 const int ECHO_DELAY_FAILED = -2;
-
-// 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
-// 供稳定的音频流。
-// 这个缓冲区对 echo delay 不会产生影响。
-#define FAREND_BUFFER_SAMPS (FRAME_SAMPS * 100)
-
-// 处理后的近端信号。
-#define NEAREND_BUFFER_SAMPS (FRAME_SAMPS * 20)
+// 下次估算回声延迟的时间间隔，或者说估算结果的有效期
+const int ECHO_DELAY_INTERVAL_MS = 30 * 1000;
 
 #define TAG "aec" // log tag
 
@@ -84,6 +78,9 @@ bool delay_est_thrd_stopped;
 static int on;
 OPENSL_STREAM  *p = NULL;
 
+// 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
+// 供稳定的音频流。
+// 这个缓冲区对 echo delay 不会产生影响。
 // 上层输入的远端信号经过 farend_buf 缓存后再输入给 audio sytem.
 // 当 farend_buf 发生 underrun （入不敷出）时，会插入一定长度的静音。
 circular_buffer *farend_buf = NULL;
@@ -109,6 +106,7 @@ int playback_delay = 0; // samps
 int echo_delay = ECHO_DELAY_NULL; // samps, relative to playback
 int echo_delay2 = ECHO_DELAY_NULL; // samps, relative to playback, estimated by WebRtc 
 bool echo_delay2_desired = false;
+int64_t last_est_time = 0; // last time we got |echo_delay2|
 int in_buffer_cnt = 0;
 int out_buffer_cnt = 0;
 
@@ -215,7 +213,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
     echo_delay2 = ECHO_DELAY_NULL; // 要求动态评估
   } else {
     echo_delay = echo_delay_ms / FRAME_MS;
-    //echo_delay2 = echo_delay;
+    echo_delay2 = echo_delay;
     echo_delay2 = ECHO_DELAY_NULL; // 要求动态评估
   }
 
@@ -239,11 +237,15 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
   p = android_OpenAudioDevice(SR, 1, 1, FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt);
   if(p == NULL) return; 
 
-  farend_buf = create_circular_buffer(FAREND_BUFFER_SAMPS);
-  nearend_buf = create_circular_buffer(NEAREND_BUFFER_SAMPS);
-  echo_buf = create_circular_buffer((MAX_DELAY + playback_delay + 4) * 2 * FRAME_SAMPS);
+  int farend_buffer_samps =  FRAME_SAMPS * std::max(100 , 20 + playback_delay);
+  farend_buf = create_circular_buffer(farend_buffer_samps);
 
-  speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
+  int nearend_buffer_samps = (FRAME_SAMPS * 100);
+  nearend_buf = create_circular_buffer(nearend_buffer_samps);
+
+  echo_buf = create_circular_buffer((MAX_DELAY /*+ playback_delay*/ + 4) * 2 * FRAME_SAMPS);
+
+  speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 12);
 
   close_dump_files(); // 假如上次运行后没有干净地结束
   open_dump_files("w+");
@@ -317,9 +319,9 @@ void runNearendProcessing()
         fclose(fd_nearend2);
       fd_farend2 = fd_nearend2 = NULL;
 
-      if (echo_delay2 == ECHO_DELAY_NULL) {
+      if (echo_delay2 == ECHO_DELAY_NULL
+          || timestamp(last_est_time) > ECHO_DELAY_INTERVAL_MS) {
         if (delay_est_thrd_stopped) {
-          I("start estimate_delay ");
           delay_est_thrd_stopped = false;
           pthread_create(&delay_est_thrd, NULL, (void* (*)(void*))estimate_delay, 0);
         }
@@ -397,7 +399,7 @@ void runNearendProcessing()
           }
           // reopen speex
           speex_ec_close();
-          speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 8);
+          speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 12);
           echo_delay = echo_delay2;
         }
         read_circular_buffer(echo_buf, refbuf, samps);
@@ -466,6 +468,9 @@ void cleanup()
 
 int estimate_delay(int async)
 {
+  static int cnt = -1;
+  I("start estimate_delay, #%d", ++cnt);
+
   short far[MAX_DELAY * FRAME_SAMPS];
   short near[FRAME_SAMPS];
   delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
@@ -511,11 +516,23 @@ int estimate_delay(int async)
       usleep(FRAME_MS * 1000);
     }
 
-    // 刷新输出结果，但不放弃搜索
-    if (echo_delay2_desired && DELAY_EST_MIN_SUCC >= 0
+    if (DELAY_EST_MIN_SUCC >= 0
         && (result >= 0 || (result = delayEst->get_best_delay()) >= 0)
         && delayEst->succ_times > DELAY_EST_MIN_SUCC) {
-      echo_delay2 = result - 2;
+      // 得到了一个质量不太差的结果
+      
+      if (echo_delay2_desired) {
+        // 刷新输出结果，但不放弃搜索
+        I("estimate_delay, output early");
+        echo_delay2 = result - 2;
+        echo_delay2_desired = false;
+      } else if (result >= echo_delay && result <= echo_delay + 4) {
+        // 这个结果与 |echo_delay| 基本一致，那么二者都正确的可能性比较高，无需
+        // 继续验证了。
+        I("estimate_delay, end early");
+        echo_delay2 = result - 2;
+        break;
+      }
     }
   }
 
@@ -541,6 +558,7 @@ int estimate_delay(int async)
     delayEst = NULL;
   }
   delay_est_thrd_stopped = true;
+  last_est_time = timestamp(0);
   return 0;
 }
 

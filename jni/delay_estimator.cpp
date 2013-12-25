@@ -30,7 +30,7 @@ bool delay_estimator::silent(short *data, int samps)
 {
   int n0 = 0;
   for (int i = 0; i < samps; ++i) {
-    if (abs(data[i]) < 2000 /* TODO is this method reliable enough?*/)
+    if (abs(data[i]) < 1000 /* TODO is this method reliable enough?*/)
       ++n0;
   }
   return n0 * 100 / samps > 95;
@@ -99,6 +99,7 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
   int result = -1; // in frame
   short *out = new short[needle_samps];
   int pos = 0; // in samps
+  int idx = 0;
   while (pos < haystack_samps - needle_samps) {
     float ratio;
     echo_cancel(needle, haystack + pos, needle_samps, out, &ratio);
@@ -112,7 +113,10 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
     }
 
     pos += FRAME_SAMPS * SEARCH_STEP;
-    usleep(1000); // 如果占用太多CPU资源，会不会影响音频主线程？
+
+    // 如果占用太多CPU资源，会不会影响音频主线程？所以 sleep 一会
+    if (idx % 4 == 0)
+      usleep(1000);
   }
 
   // dump best result
