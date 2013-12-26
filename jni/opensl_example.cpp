@@ -362,7 +362,8 @@ void runNearendProcessing()
         && (last_est_time == 0
           || timestamp(last_est_time) > ECHO_DELAY_INTERVAL_MS)) {
       // 周期性地写音频日志
-      if (fd_nearend2 == NULL) {
+      if (fd_nearend2 == NULL
+          && !delay_estimator::silent(render_buf, FRAME_SAMPS)) {
         open_log_files();
         logged_samps = 0;
         near_log_countdown = checkspace_circular_buffer(p->outrb, 0);

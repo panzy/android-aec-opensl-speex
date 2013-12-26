@@ -58,12 +58,12 @@ class delay_estimator {
   int get_far_samps() { return total_far_samps; }
   int get_near_samps() { return total_near_samps; }
   int is_processing();
+  static bool silent(short *data, int samps);
 
   //------------------------------------------------------------
   private:
 
   int64_t timestamp(int64_t base);
-  bool silent(short *data, int samps);
   void speex_ec_open (int sampleRate, int bufsize, int totalSize);
   void speex_ec_close ();
   void echo_cancel(short *in, short *ref, int samps,
