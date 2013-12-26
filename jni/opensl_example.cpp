@@ -38,12 +38,20 @@
 
 const int MAX_DELAY = 50;
 const int NEAREND_SIZE = 50; // 太短可能会得到完全错误的结果（取决于实际输入）
-const int DELAY_EST_MIN_SUCC = 15; // 负数表示无限
 // 回声延迟（以frame为单位）的有效值 >= 0，下面是几个特殊的无效值
 const int ECHO_DELAY_NULL = -1;
 const int ECHO_DELAY_FAILED = -2;
-// 下次估算回声延迟的时间间隔，或者说估算结果的有效期
+// 我们是周期性、间歇地把远、近端信号写到日志文件供评估回声延迟的，
+// 写满 MAX_LOG_SAMPS 就暂停日志并开始分析……
+const int MAX_LOG_SAMPS = FRAME_SAMPS * (MAX_DELAY * 3);
+// ……下次估算回声延迟的时间间隔，或者说估算结果的有效期
 const int ECHO_DELAY_INTERVAL_MS = 30 * 1000;
+
+// delay tolerance in frames.
+// 这个值跟回声延迟的波动幅度有关。
+const int DELAY_TOL = 2;
+// speex AEC filter size in frame
+const int SPEEX_FILTER_SIZE = 10;
 
 #define TAG "aec" // log tag
 
@@ -112,6 +120,17 @@ int out_buffer_cnt = 0;
 
 //----------------------------------------------------------------------
 
+// 根据 estimate_delay() 的返回值，设置 |echo_delay2| 全局变量的值。
+// 之所以不用简单的赋值，是因为存在 |DELAY_TOL| 常数。
+void adjust_echo_delay2(int value)
+{
+  if (value >= 0) {
+    echo_delay2 = value - DELAY_TOL;
+  } else {
+    echo_delay2 = ECHO_DELAY_FAILED;
+  }
+}
+
 // fill_with - a frame to fill with.
 void align_farend_buf(int n, short *fill_with) {
   while (n > 0) {
@@ -143,8 +162,10 @@ void fwrite_samps(short *frame, FILE *fd, int samps)
   }
 }
 
-void open_dump_files(const char *mode)
+void open_log_files()
 {
+  I("open_log_files");
+  const char *mode = "w+";
   int r = mkdir("/mnt/sdcard/tmp", 755);
   if (r == 0 || errno == EEXIST) {
     fd_farend2 = fopen("/mnt/sdcard/tmp/far2.raw", mode);
@@ -152,7 +173,12 @@ void open_dump_files(const char *mode)
   } else {
     fd_farend2 = fd_nearend2 = NULL;
   }
+}
+
+void open_dump_files(const char *mode)
+{
 #if DUMP_RAW
+  int r = mkdir("/mnt/sdcard/tmp", 755);
   if (r == 0 || errno == EEXIST) {
     fd_farend = fopen("/mnt/sdcard/tmp/far.raw", mode);
     fd_nearend = fopen("/mnt/sdcard/tmp/near.raw", mode);
@@ -164,12 +190,18 @@ void open_dump_files(const char *mode)
 #endif
 }
 
-void close_dump_files()
+void close_log_files()
 {
+  I("close_log_files");
   if (fd_farend2)
     fclose(fd_farend2);
   if (fd_nearend2)
     fclose(fd_nearend2);
+  fd_farend2 = fd_nearend2 = NULL;
+}
+
+void close_dump_files()
+{
 #if DUMP_RAW
   if (fd_farend)
     fclose(fd_farend);
@@ -180,7 +212,7 @@ void close_dump_files()
   if (fd_send)
     fclose(fd_send);
 #endif
-  fd_farend = fd_farend2 = fd_nearend = fd_nearend2 = fd_echo = fd_send = NULL;
+  fd_farend = fd_nearend = fd_echo = fd_send = NULL;
   I("dump files closed");
 }
 
@@ -209,7 +241,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
     echo_delay = 18 * track_min_buf_size / 870;
     // 延迟修正不足没关系，因为 speex AEC 模块有个 filter length 参数，初始化为
     // 8xframe，但是修正过度就很严重，将完全不能消除回声。
-    echo_delay -= 2;
+    echo_delay -= DELAY_TOL;
     echo_delay2 = ECHO_DELAY_NULL; // 要求动态评估
   } else {
     echo_delay = echo_delay_ms / FRAME_MS;
@@ -245,9 +277,8 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
 
   echo_buf = create_circular_buffer((MAX_DELAY /*+ playback_delay*/ + 4) * 2 * FRAME_SAMPS);
 
-  speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 12);
+  speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * SPEEX_FILTER_SIZE);
 
-  close_dump_files(); // 假如上次运行后没有干净地结束
   open_dump_files("w+");
   on = 1;
   t_start = timestamp(0);
@@ -271,22 +302,23 @@ void runNearendProcessing()
   }
 
   //
-  // 每次循环处理一个 FRAME
-  //
+  // 主循环
   //
   // 我们并不试图让每一次循环的持续时间精确为 FRAME_MS，因为这不可能做到：尽管绝
   // 大多数情况下我们只需要比如说3ms就处理完了一个frame，但是偶尔（进程调度？）
   // 也会需要明显超过 FRAME_MS 的毫秒数。
   // 所以我们能做的是在一个更大的时间跨度上让实际流逝时间与音频时间大体上保持一致
   // ，这个偏差要在相关缓冲区的承受范围之内，具体来说：
-  // A. 循环不能太快，否则从 OpenSL OPENSL_STREAM->outrb 可能读不到数据，以及
+  // A. 循环不能太快，否则从 opensl_stream::inrb 可能读不到数据，以及
   // nearend_buf 中的未读数据会被覆盖；
-  // B. 但也不能太慢，否则OpenSL OPENSL_STREAM->inrb 中的未读数据会被覆盖。
+  // B. 但也不能太慢，否则 opensl_stream::outrb 中的未读数据会被覆盖。
   //
   // 另外，AudioSystem record buffer overflow 好像也跟这个有关。
   //
   // 把时间提前量定义为
   //    ahead = 物理时长 - 已处理的音频的时长
+  // 然后在循环体中试图将 |ahead| 维持在 [min_ahead, max_ahead] 区间内。
+  // |min_ahead| 不能太小，否则就令 opensl_stream::outrb 失去了缓冲效果。
   int max_ahead = (int)(out_buffer_cnt * 3 / 4) * FRAME_MS;
   int min_ahead = max_ahead - 5 * FRAME_MS;// std::max(max_ahead / 2, 5 * FRAME_MS);
   I("main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
@@ -305,26 +337,42 @@ void runNearendProcessing()
   int loop_idx = -1;
   int rendered_samps = 0;
   int captured_samps = 0;
+  int logged_samps = 0;
+  bool far_log_started = false;
+  // 我们将要计算的回声延迟不包含 struct opensl_stream 的回放缓冲区内的音频数据
+  // 的长度。
+  //
+  // 换言之，回声延迟作为一个时间差，它的起点是音频帧被提交给 OpenSL Audio
+  // Player 的时刻（这一层又有一个缓冲区，但是我们已经让它足够小了因而可以忽略）
+  // ，而非音频帧通过 opensl_stream::android_AudioOut() 被添加到struct
+  // opensl_stream 的缓冲区的时刻。
+  //
+  // 刚开始写 farend log 时，|near_log_countdown| 被设置为 struct
+  // opensl_stream::outrb 的内容长度，nearend log 将跳过与之等量的数据才开始写。
+  int near_log_countdown = 0; // in samps
   int64_t t0 = timestamp(0), t1 = 0; // loop body begins
   while(on) {
     t1 = timestamp(0);
     ++loop_idx;
 
+    //
     // estimate echo delay
-    if (rendered_samps > FRAME_SAMPS * (playback_delay + MAX_DELAY * 5)) {
-      // XXX 关闭文件，否则 estimate_delay() 会阻塞在 fopen() 上。 
-      if (fd_farend2)
-        fclose(fd_farend2);
-      if (fd_nearend2)
-        fclose(fd_nearend2);
-      fd_farend2 = fd_nearend2 = NULL;
-
-      if (echo_delay2 == ECHO_DELAY_NULL
-          || timestamp(last_est_time) > ECHO_DELAY_INTERVAL_MS) {
-        if (delay_est_thrd_stopped) {
-          delay_est_thrd_stopped = false;
-          pthread_create(&delay_est_thrd, NULL, (void* (*)(void*))estimate_delay, 0);
-        }
+    //
+    if (loop_idx > playback_delay && delay_est_thrd_stopped
+        && (last_est_time == 0
+          || timestamp(last_est_time) > ECHO_DELAY_INTERVAL_MS)) {
+      // 周期性地写音频日志
+      if (fd_nearend2 == NULL) {
+        open_log_files();
+        logged_samps = 0;
+        near_log_countdown = checkspace_circular_buffer(p->outrb, 0);
+      }
+      // 音频日志长度够了就关闭并开始用它分析回声延迟
+      else if (logged_samps > MAX_LOG_SAMPS) {
+        close_log_files();
+        far_log_started = false;
+        delay_est_thrd_stopped = false;
+        pthread_create(&delay_est_thrd, NULL, (void* (*)(void*))estimate_delay, 0);
       }
     }
 
@@ -337,6 +385,7 @@ void runNearendProcessing()
     } else {
       int samps = read_circular_buffer(farend_buf, render_buf, FRAME_SAMPS);
       if (samps > 0) {
+        far_log_started = true;
         playback(render_buf, samps, true);
         rendered_samps += samps;
       }
@@ -382,7 +431,7 @@ void runNearendProcessing()
         if (echo_delay2 >= 0 && echo_delay2 != echo_delay) {
           I("adjust echo buffer: %d=>%d", echo_delay, echo_delay2);
           if (echo_delay >= 0) {
-            if (echo_delay2 > echo_delay + 2) {
+            if (echo_delay2 > echo_delay) {
               for (int i = 0, n = echo_delay2 - echo_delay; i < n; ++i) {
                 write_circular_buffer(echo_buf, silence, FRAME_SAMPS);
               }
@@ -399,7 +448,7 @@ void runNearendProcessing()
           }
           // reopen speex
           speex_ec_close();
-          speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 12);
+          speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * SPEEX_FILTER_SIZE);
           echo_delay = echo_delay2;
         }
         read_circular_buffer(echo_buf, refbuf, samps);
@@ -411,15 +460,19 @@ void runNearendProcessing()
           // do AEC
           speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
           speex_preprocess_run(den, processedbuffer);
-          DUMP_SAMPS(inbuffer, fd_nearend, samps);
-          DUMP_SAMPS(refbuf, fd_echo, samps);
-          DUMP_SAMPS(processedbuffer, fd_send, samps);
           out = processedbuffer;
         }
         // output
         write_circular_buffer(nearend_buf, out, samps);
-        if (captured_samps > playback_delay * FRAME_SAMPS && fd_nearend2)
+        if (far_log_started && fd_nearend2
+            && (near_log_countdown <= 0
+              || (near_log_countdown -= samps) <= 0)) {
           fwrite_samps(inbuffer, fd_nearend2, samps);
+          logged_samps += samps;
+        }
+        DUMP_SAMPS(inbuffer, fd_nearend, samps);
+        DUMP_SAMPS(refbuf, fd_echo, samps);
+        DUMP_SAMPS(out, fd_send, samps);
       } else {
         D("record nothing at @%"PRId64"ms", timestamp(t0));
         break;
@@ -485,8 +538,9 @@ int estimate_delay(int async)
   int64_t t0 = timestamp(0);
   int result = -1;
   int i = 0;
+  bool echo_delay2_adjusted = false;
   fseek(fd_n, i * FRAME_SAMPS * 2, SEEK_SET);
-  for (; /*i < MAX_DELAY * 40*/; ++i)
+  while(1)
   {
     if (FRAME_SAMPS != fread(far, 2, FRAME_SAMPS, fd_f))
       break;
@@ -498,11 +552,13 @@ int estimate_delay(int async)
     delayEst->add_near(near, FRAME_SAMPS);
 
     // 减少搜索次数，希望不会影响结果的正确性
-    if (i % 2 == 0)
+    if (++i == 2) {
+      i = 0;
       continue;
+    }
 
     int hint = delayEst->get_largest_delay() > 0
-      ? delayEst->get_largest_delay() : echo_delay + 2;
+      ? delayEst->get_largest_delay() : echo_delay + DELAY_TOL;
     if (!async) {
       // sync call
       result = delayEst->process(hint);
@@ -516,37 +572,32 @@ int estimate_delay(int async)
       usleep(FRAME_MS * 1000);
     }
 
+    const int DELAY_EST_MIN_SUCC = 20; // 负数表示无限
     if (DELAY_EST_MIN_SUCC >= 0
         && (result >= 0 || (result = delayEst->get_best_delay()) >= 0)
-        && delayEst->succ_times > DELAY_EST_MIN_SUCC) {
+        && delayEst->succ_times > DELAY_EST_MIN_SUCC
+        && delayEst->get_best_hit() > 4) {
       // 得到了一个质量不太差的结果
       
       if (echo_delay2_desired) {
         // 刷新输出结果，但不放弃搜索
         I("estimate_delay, output early");
-        echo_delay2 = result - 2;
+        echo_delay2 = result - DELAY_TOL;
         echo_delay2_desired = false;
-      } else if (result >= echo_delay && result <= echo_delay + 4) {
+      } else if (result >= echo_delay && result <= echo_delay + DELAY_TOL * 2) {
         // 这个结果与 |echo_delay| 基本一致，那么二者都正确的可能性比较高，无需
         // 继续验证了。
         I("estimate_delay, end early");
-        echo_delay2 = result - 2;
+        adjust_echo_delay2(result);
+        echo_delay2_adjusted = true;
         break;
       }
     }
   }
 
-  // 为保险起见，倾向于选择偏小一点的值
-#if 0
-  int r2 = delayEst->get_2nd_best_delay();
-  if (r2 >= 0 && r2 >= result - 2)
-    echo_delay2 = result - 2;
-  else
-    echo_delay2 = result;
-#else
-  echo_delay2 = result - 2;
-#endif
-  if (echo_delay2 < 0) echo_delay2 = ECHO_DELAY_FAILED;
+  if (!echo_delay2_adjusted) {
+    adjust_echo_delay2(result);
+  }
 
   I("delay estimation done, result %d, elapse %dms", result, (int)timestamp(t0));
   I("got echo_delay2 %d", echo_delay2);
@@ -586,7 +637,7 @@ float *to_float(short *frame)
 int playback(short *_farend, int samps, bool with_aec_analyze)
 {
   // analyze
-  if (with_aec_analyze) {
+  if (with_aec_analyze && fd_farend2) {
     fwrite_samps(_farend, fd_farend2, samps);
   }
 

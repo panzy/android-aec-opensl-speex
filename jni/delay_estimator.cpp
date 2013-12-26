@@ -115,8 +115,10 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
     pos += FRAME_SAMPS * SEARCH_STEP;
 
     // 如果占用太多CPU资源，会不会影响音频主线程？所以 sleep 一会
-    if (idx % 4 == 0)
+    if (++idx == 3) {
       usleep(1000);
+      idx = 0;
+    }
   }
 
   // dump best result
