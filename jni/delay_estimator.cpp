@@ -274,12 +274,12 @@ int delay_estimator::process(int hint)
   // begin process_lock ///////////////
   if (0 != pthread_mutex_trylock(&process_lock)) {
     D("another process thread already runs, abort (3)");
-    return best_delay;
+    return -1;
   }
   // single running instance
   if (processing) {
     D("another process thread already runs, abort (4)");
-    return best_delay;
+    return -1;
   }
   if (total_near_samps < MAX_NEAR_SAMPS) {
     D("nearend buffer not enough (%d/%d), return", total_near_samps, MAX_NEAR_SAMPS);
@@ -290,6 +290,7 @@ int delay_estimator::process(int hint)
   pthread_mutex_unlock(&process_lock);
   // end process_lock ///////////////
 
+  int result = -1;
   if (processing)
   {
     // take snapshot of farend and nearend buffer
@@ -298,7 +299,6 @@ int delay_estimator::process(int hint)
     short *far = NULL;
     short *near = NULL;
 
-    int result = -1;
     float quality = 0;
 
     int64_t t0 = timestamp(0);
@@ -432,7 +432,7 @@ int delay_estimator::process(int hint)
       delete[] near;
   }
 
-  return best_delay;
+  return result;
 }
 
 int delay_estimator::score_delay(int delay)

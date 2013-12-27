@@ -522,6 +522,7 @@ void cleanup()
 
 int estimate_delay(int async)
 {
+  const int DELAY_EST_MIN_SUCC = 20; // 负数表示无限
   static int cnt = -1;
   I("start estimate_delay, #%d", ++cnt);
 
@@ -539,6 +540,7 @@ int estimate_delay(int async)
   int64_t t0 = timestamp(0);
   int result = -1;
   int i = 0;
+  int skip_countdown = 0;
   bool echo_delay2_adjusted = false;
   fseek(fd_n, i * FRAME_SAMPS * 2, SEEK_SET);
   while(1)
@@ -553,8 +555,7 @@ int estimate_delay(int async)
     delayEst->add_near(near, FRAME_SAMPS);
 
     // 减少搜索次数，希望不会影响结果的正确性
-    if (++i == 2) {
-      i = 0;
+    if (--skip_countdown > 0) {
       continue;
     }
 
@@ -563,6 +564,12 @@ int estimate_delay(int async)
     if (!async) {
       // sync call
       result = delayEst->process(hint);
+      if (result < 0) {
+        skip_countdown = 5;
+        continue;
+      } else {
+        skip_countdown = 2;
+      }
     } else {
       // async call
       if (delayEst->get_near_samps() > NEAREND_SIZE) {
@@ -573,13 +580,13 @@ int estimate_delay(int async)
       usleep(FRAME_MS * 1000);
     }
 
-    const int DELAY_EST_MIN_SUCC = 20; // 负数表示无限
-    if (DELAY_EST_MIN_SUCC >= 0
-        && (result >= 0 || (result = delayEst->get_best_delay()) >= 0)
+    if (result >= 0
+        && DELAY_EST_MIN_SUCC >= 0
         && delayEst->succ_times > DELAY_EST_MIN_SUCC
         && delayEst->get_best_hit() > 4) {
       // 得到了一个质量不太差的结果
       
+      result = delayEst->get_best_delay();
       if (echo_delay2_desired) {
         // 刷新输出结果，但不放弃搜索
         I("estimate_delay, output early");
@@ -597,6 +604,7 @@ int estimate_delay(int async)
   }
 
   if (!echo_delay2_adjusted) {
+    result = delayEst->get_best_delay();
     adjust_echo_delay2(result);
   }
 
