@@ -43,7 +43,7 @@ const int ECHO_DELAY_NULL = -1;
 const int ECHO_DELAY_FAILED = -2;
 // 我们是周期性、间歇地把远、近端信号写到日志文件供评估回声延迟的，
 // 写满 MAX_LOG_SAMPS 就暂停日志并开始分析……
-const int MAX_LOG_SAMPS = FRAME_SAMPS * (MAX_DELAY * 5);
+const int MAX_LOG_SAMPS = FRAME_SAMPS * (MAX_DELAY * 3);
 // ……下次估算回声延迟的时间间隔，或者说估算结果的有效期
 const int ECHO_DELAY_INTERVAL_MS = 30 * 1000;
 
@@ -323,8 +323,11 @@ void runNearendProcessing()
   //    ahead = 物理时长 - 已处理的音频的时长
   // 然后在循环体中试图将 |ahead| 维持在 [min_ahead, max_ahead] 区间内。
   // |min_ahead| 不能太小，否则就令 opensl_stream::outrb 失去了缓冲效果。
+  //
+  // elapse tolerance in frames
+  const int ELAPSE_TOL = 4;
   int max_ahead = (out_buffer_cnt - 2) * FRAME_MS; // (int)(out_buffer_cnt * 3 / 4) * FRAME_MS;
-  int min_ahead = max_ahead - 3 * FRAME_MS;// std::max(max_ahead / 2, 5 * FRAME_MS);
+  int min_ahead = max_ahead - 1 * FRAME_MS;// std::max(max_ahead / 2, 5 * FRAME_MS);
   I("main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
       min_ahead, max_ahead, min_ahead / FRAME_MS, max_ahead / FRAME_MS);
 
@@ -423,11 +426,14 @@ void runNearendProcessing()
     //
     // record
     //
+    int64_t rec_proc_start = timestamp(0);
     int lack_cap_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - captured_samps;
-    if (lack_cap_samps > FRAME_SAMPS * 2) {
-      D("record overrun, lack_cap_samps %d", lack_cap_samps);
+    if (lack_cap_samps >= FRAME_SAMPS * ELAPSE_TOL) {
+      W("record overrun, lack_cap_samps %d", lack_cap_samps);
     }
+    int loop_cnt = 0;
     while (lack_cap_samps >= FRAME_SAMPS) {
+      ++loop_cnt;
       int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
       if (samps == FRAME_SAMPS) {
         if (captured_samps == 0) 
@@ -487,15 +493,21 @@ void runNearendProcessing()
         D("record nothing at @%"PRId64"ms", timestamp(t0));
         break;
       }
+      if (timestamp(rec_proc_start) > FRAME_MS * ELAPSE_TOL / 4)
+        break;
+    }
+    if (timestamp(rec_proc_start) >= FRAME_MS * ELAPSE_TOL) {
+      E("record processing lasts too long: %"PRId64"ms for %d loops",
+          timestamp(rec_proc_start), loop_cnt);
     }
 
     // log time elapse
     if (1) {
-      int64_t curr_ahead = FRAME_MS - timestamp(t1);
-      if (curr_ahead > 0) {
+      int64_t curr_ahead = FRAME_MS * ELAPSE_TOL - timestamp(t1);
+      if (curr_ahead >= 0) {
         D("idle: curr %"PRId64"ms", curr_ahead);
       } else {
-        D("idle: curr overrun for %"PRId64"ms!", -curr_ahead);
+        E("idle: curr overrun for %"PRId64"ms!", -curr_ahead);
       }
     }
   }

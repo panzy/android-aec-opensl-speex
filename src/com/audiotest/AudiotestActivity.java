@@ -216,7 +216,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
         opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms);
         thread.start();
         thread2.start();
-        //thread3.start();
+        thread3.start();
     }
 
     private void play_record_aec_stop() {
