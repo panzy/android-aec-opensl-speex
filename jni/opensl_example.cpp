@@ -68,6 +68,7 @@ const int SPEEX_FILTER_SIZE = 10;
 //--------------------------------------------------------------------------------
 
 void cleanup();
+bool estimation_not_bad(delay_estimator *d);
 void fwrite_samps(short *frame, FILE *fd, int samps);
 void speex_ec_open (int sampleRate, int bufsize, int totalSize);
 void speex_ec_close ();
@@ -527,7 +528,6 @@ void cleanup()
 
 int estimate_delay(int async)
 {
-  const int DELAY_EST_MIN_SUCC = 10; // 负数表示无限
   static int cnt = -1;
   I("start estimate_delay, #%d", ++cnt);
 
@@ -581,9 +581,7 @@ int estimate_delay(int async)
         }
         // 如果连续失败好多次，而且之前已经有了不错的结果，就早点结束
         if (inertance < -2
-            && DELAY_EST_MIN_SUCC >= 0
-            && delayEst->succ_times > DELAY_EST_MIN_SUCC
-            && delayEst->get_best_hit() > 4) {
+            && estimation_not_bad(delayEst)) {
           I("estimate_delay, end early, case #2");
           break;
         }
@@ -607,9 +605,7 @@ int estimate_delay(int async)
     }
 
     if (result >= 0
-        && DELAY_EST_MIN_SUCC >= 0
-        && delayEst->succ_times > DELAY_EST_MIN_SUCC
-        && delayEst->get_best_hit() > 4) {
+        && estimation_not_bad(delayEst)) {
       // 得到了一个质量不太差的结果
       
       result = delayEst->get_best_delay();
@@ -629,7 +625,7 @@ int estimate_delay(int async)
     }
   }
 
-  if (!echo_delay2_adjusted) {
+  if (!echo_delay2_adjusted && estimation_not_bad(delayEst)) {
     result = delayEst->get_best_delay();
     adjust_echo_delay2(result);
   }
@@ -646,6 +642,15 @@ int estimate_delay(int async)
   delay_est_thrd_stopped = true;
   last_est_time = timestamp(0);
   return 0;
+}
+
+bool estimation_not_bad(delay_estimator *d)
+{
+  const int MIN_SUCC = 10; // <=0 表示无限
+  const int MIN_HIT = 5;
+  return (MIN_SUCC <= 0
+      || delayEst->succ_times >= MIN_SUCC)
+    && delayEst->get_best_hit() >= MIN_HIT;
 }
 
 int pull(JNIEnv *env, jshortArray buf)
