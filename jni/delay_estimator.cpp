@@ -28,12 +28,12 @@ int64_t delay_estimator::timestamp(int64_t base)
 
 bool delay_estimator::silent(short *data, int samps)
 {
-  int n0 = 0;
   for (int i = 0; i < samps; ++i) {
-    if (abs(data[i]) < 1000 /* TODO is this method reliable enough?*/)
-      ++n0;
+    // 由于自然语音的特点，仅凭一个不平凡的采样就可以认为这一帧“有声音”。
+    if (abs(data[i]) > 1500)
+      return false;
   }
-  return n0 * 100 / samps > 95;
+  return true;
 }
 
 void delay_estimator::speex_ec_open(int sampleRate, int bufsize, int totalSize)
