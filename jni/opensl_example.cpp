@@ -255,7 +255,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
   out_buffer_cnt = ceil((float)track_min_buf_size / sample_size / FRAME_SAMPS);
 
   // 太小的 out_buffer_cnt （比如3） 不足以保证流畅的播放。
-  const int min_buffer_cnt = 30;
+  const int min_buffer_cnt = 20;
   if (out_buffer_cnt < min_buffer_cnt) out_buffer_cnt = min_buffer_cnt;
   // 尚未观测到 in_buffer_cnt 太小的直接影响，不过为了简化主循环中控制 ahead 时
   // 间的逻辑，这里也强制 in_buffer_cnt 不小于一个阈值。
@@ -270,10 +270,11 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
   p = android_OpenAudioDevice(SR, 1, 1, FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt);
   if(p == NULL) return; 
 
-  int farend_buffer_samps =  FRAME_SAMPS * std::max(100 , 20 + playback_delay);
+  int farend_buffer_samps =  FRAME_SAMPS * std::max(FRAME_RATE * 5, 20 + playback_delay);
   farend_buf = create_circular_buffer(farend_buffer_samps);
 
-  int nearend_buffer_samps = (FRAME_SAMPS * 100);
+  // 观测到过上层的java代码调用 pull() 的最大时间间隔达 3200+ms
+  int nearend_buffer_samps = (FRAME_SAMPS * FRAME_RATE * 5);
   nearend_buf = create_circular_buffer(nearend_buffer_samps);
 
   echo_buf = create_circular_buffer((MAX_DELAY /*+ playback_delay*/ + 4) * 2 * FRAME_SAMPS);
@@ -322,8 +323,8 @@ void runNearendProcessing()
   //    ahead = 物理时长 - 已处理的音频的时长
   // 然后在循环体中试图将 |ahead| 维持在 [min_ahead, max_ahead] 区间内。
   // |min_ahead| 不能太小，否则就令 opensl_stream::outrb 失去了缓冲效果。
-  int max_ahead = (int)(out_buffer_cnt * 3 / 4) * FRAME_MS;
-  int min_ahead = max_ahead - 5 * FRAME_MS;// std::max(max_ahead / 2, 5 * FRAME_MS);
+  int max_ahead = (out_buffer_cnt - 2) * FRAME_MS; // (int)(out_buffer_cnt * 3 / 4) * FRAME_MS;
+  int min_ahead = max_ahead - 3 * FRAME_MS;// std::max(max_ahead / 2, 5 * FRAME_MS);
   I("main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
       min_ahead, max_ahead, min_ahead / FRAME_MS, max_ahead / FRAME_MS);
 
@@ -470,7 +471,9 @@ void runNearendProcessing()
           out = processedbuffer;
         }
         // output
-        write_circular_buffer(nearend_buf, out, samps);
+        if (samps != write_circular_buffer(nearend_buf, out, samps)) {
+          E("nearend_buf full");
+        }
         if (far_log_started && fd_nearend2
             && (near_log_countdown <= 0
               || (near_log_countdown -= samps) <= 0)) {
@@ -655,6 +658,13 @@ bool estimation_not_bad(delay_estimator *d)
 
 int pull(JNIEnv *env, jshortArray buf)
 {
+  static int64_t last_pull = 0;
+
+  if(last_pull > 0 && timestamp(last_pull) > FRAME_MS * 10) {
+    W("pull() too slow: %"PRId64"ms since last call", timestamp(last_pull));
+  }
+  last_pull = timestamp(0);
+
   if (!nearend_buf)
     return 0;
   jshort *_buf = env->GetShortArrayElements(buf, NULL);
