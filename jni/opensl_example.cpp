@@ -43,7 +43,7 @@ const int ECHO_DELAY_NULL = -1;
 const int ECHO_DELAY_FAILED = -2;
 // 我们是周期性、间歇地把远、近端信号写到日志文件供评估回声延迟的，
 // 写满 MAX_LOG_SAMPS 就暂停日志并开始分析……
-const int MAX_LOG_SAMPS = FRAME_SAMPS * (MAX_DELAY * 3);
+const int MAX_LOG_SAMPS = FRAME_SAMPS * (MAX_DELAY * 5);
 // ……下次估算回声延迟的时间间隔，或者说估算结果的有效期
 const int ECHO_DELAY_INTERVAL_MS = 30 * 1000;
 
@@ -295,6 +295,8 @@ void runNearendProcessing()
   short processedbuffer[FRAME_SAMPS];
   short render_buf[FRAME_SAMPS];
 
+  memset(render_buf, 0, FRAME_SAMPS * 2);
+
   // delay echo_buf (relative to farend_buf)
   if (echo_delay > 0) {
     for (int i = 0; i < echo_delay; ++i)
@@ -362,11 +364,12 @@ void runNearendProcessing()
         && (last_est_time == 0
           || timestamp(last_est_time) > ECHO_DELAY_INTERVAL_MS)) {
       // 周期性地写音频日志
-      if (fd_nearend2 == NULL
-          && !delay_estimator::silent(render_buf, FRAME_SAMPS)) {
-        open_log_files();
+      if (fd_nearend2 == NULL) {
         logged_samps = 0;
-        near_log_countdown = checkspace_circular_buffer(p->outrb, 0);
+        if (!delay_estimator::silent(render_buf, FRAME_SAMPS)) {
+          open_log_files();
+          near_log_countdown = checkspace_circular_buffer(p->outrb, 0);
+        }
       }
       // 音频日志长度够了就关闭并开始用它分析回声延迟
       else if (logged_samps > MAX_LOG_SAMPS) {
@@ -400,6 +403,8 @@ void runNearendProcessing()
         // 但是如果用上一帧补充，有可能产生音量很大的嗡鸣，更坏。
         align_farend_buf(lack_samps, silence);
         rendered_samps += lack_samps;
+        if (lack_samps >= FRAME_SAMPS)
+          memset(render_buf, 0, FRAME_SAMPS * 2);
       }
     }
     // 平衡 rendered_samps 与物理时间

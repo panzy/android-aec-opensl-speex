@@ -30,7 +30,7 @@ bool delay_estimator::silent(short *data, int samps)
 {
   for (int i = 0; i < samps; ++i) {
     // 由于自然语音的特点，仅凭一个不平凡的采样就可以认为这一帧“有声音”。
-    if (abs(data[i]) > 1500)
+    if (abs(data[i]) > 2500)
       return false;
   }
   return true;
@@ -115,7 +115,7 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
     pos += FRAME_SAMPS * SEARCH_STEP;
 
     // 如果占用太多CPU资源，会不会影响音频主线程？所以 sleep 一会
-    if (++idx == 3) {
+    if (++idx == 2) {
       usleep(1000);
       idx = 0;
     }
