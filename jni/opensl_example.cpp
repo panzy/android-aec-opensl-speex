@@ -522,7 +522,7 @@ void cleanup()
 
 int estimate_delay(int async)
 {
-  const int DELAY_EST_MIN_SUCC = 20; // 负数表示无限
+  const int DELAY_EST_MIN_SUCC = 10; // 负数表示无限
   static int cnt = -1;
   I("start estimate_delay, #%d", ++cnt);
 
@@ -541,6 +541,9 @@ int estimate_delay(int async)
   int result = -1;
   int i = 0;
   int skip_countdown = 0;
+  // 描述 delay_estimator::process() 结果的惯性：
+  // 成功就 +1；失败就 -1；交替就清零。
+  int inertance = 0;
   bool echo_delay2_adjusted = false;
   fseek(fd_n, i * FRAME_SAMPS * 2, SEEK_SET);
   while(1)
@@ -566,9 +569,27 @@ int estimate_delay(int async)
       result = delayEst->process(hint);
       if (result < 0) {
         skip_countdown = 5;
+        if (inertance >= 0) {
+          inertance = -1;
+        } else {
+          --inertance;
+        }
+        // 如果连续失败好多次，而且之前已经有了不错的结果，就早点结束
+        if (inertance < -2
+            && DELAY_EST_MIN_SUCC >= 0
+            && delayEst->succ_times > DELAY_EST_MIN_SUCC
+            && delayEst->get_best_hit() > 4) {
+          I("estimate_delay, end early, case #2");
+          break;
+        }
         continue;
       } else {
         skip_countdown = 2;
+        if (inertance <= 0) {
+          inertance = 1;
+        } else {
+          ++inertance;
+        }
       }
     } else {
       // async call
