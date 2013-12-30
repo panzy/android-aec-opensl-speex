@@ -517,6 +517,10 @@ void runNearendProcessing()
     }
   }
 
+  if (!delay_est_thrd_stopped) {
+    pthread_join(delay_est_thrd, NULL);
+  }
+
   cleanup();
 }
 
@@ -576,7 +580,7 @@ int estimate_delay(int async)
   int inertance = 0;
   bool echo_delay2_adjusted = false;
   fseek(fd_n, i * FRAME_SAMPS * 2, SEEK_SET);
-  while(1)
+  while(on)
   {
     if (FRAME_SAMPS != fread(far, 2, FRAME_SAMPS, fd_f))
       break;
