@@ -26,11 +26,15 @@ int64_t delay_estimator::timestamp(int64_t base)
   return ((int64_t)t.tv_sec * 1000 + (int64_t)(t.tv_usec / 1000)) - base;
 }
 
-bool delay_estimator::silent(short *data, int samps)
+/**
+ * threshold_amp - threshold amplitude, recommanded value: 2500 for farend, 1000
+ * for nearend.
+ */
+bool delay_estimator::silent(short *data, int samps, short threshold_amp)
 {
   for (int i = 0; i < samps; ++i) {
     // 由于自然语音的特点，仅凭一个不平凡的采样就可以认为这一帧“有声音”。
-    if (abs(data[i]) > 2500)
+    if (abs(data[i]) > threshold_amp)
       return false;
   }
   return true;
@@ -90,7 +94,7 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
 {
   //D("search_audio, %d/%d", needle_samps, haystack_samps);
 
-  if (silent(needle, needle_samps)) {
+  if (silent(needle, needle_samps, 1200)) {
     D("ignore silent needle at frame");
     return -1;
   }
@@ -99,7 +103,6 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
   int result = -1; // in frame
   short *out = new short[needle_samps];
   int pos = 0; // in samps
-  int idx = 0;
   while (pos < haystack_samps - needle_samps) {
     float ratio;
     echo_cancel(needle, haystack + pos, needle_samps, out, &ratio);
@@ -113,12 +116,6 @@ int delay_estimator::search_audio(short *haystack, int haystack_samps, short *ne
     }
 
     pos += FRAME_SAMPS * SEARCH_STEP;
-
-    // 如果占用太多CPU资源，会不会影响音频主线程？所以 sleep 一会
-    if (++idx == 2) {
-      usleep(10000);
-      idx = 0;
-    }
   }
 
   // dump best result

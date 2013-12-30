@@ -11,6 +11,7 @@
 #include <sys/errno.h>
 #include <math.h>
 #include <unistd.h>
+#include <sys/resource.h> // setpriority
 #include "opensl_io2.h"
 
 #include "speex/speex_echo.h"
@@ -55,7 +56,7 @@ const int SPEEX_FILTER_SIZE = 10;
 
 #define TAG "aec" // log tag
 
-#define DUMP_RAW 1
+#define DUMP_RAW 0
 #if DUMP_RAW
 #define DUMP_SAMPS(p,f,n) fwrite_samps(p,f,n)
 #else
@@ -297,6 +298,10 @@ void runNearendProcessing()
   short processedbuffer[FRAME_SAMPS];
   short render_buf[FRAME_SAMPS];
 
+  int pri = getpriority(PRIO_PROCESS, 0);
+  setpriority(PRIO_PROCESS, 0, -19);
+  I("runNearendProcessing, niceness: %d=>%d", pri, getpriority(PRIO_PROCESS, 0));
+
   memset(render_buf, 0, FRAME_SAMPS * 2);
 
   // delay echo_buf (relative to farend_buf)
@@ -371,7 +376,7 @@ void runNearendProcessing()
       // 周期性地写音频日志
       if (fd_nearend2 == NULL) {
         logged_samps = 0;
-        if (!delay_estimator::silent(render_buf, FRAME_SAMPS)) {
+        if (!delay_estimator::silent(render_buf, FRAME_SAMPS, 2500)) {
           open_log_files();
           near_log_countdown = checkspace_circular_buffer(p->outrb, 0);
         }
@@ -544,6 +549,11 @@ void cleanup()
 int estimate_delay(int async)
 {
   static int cnt = -1;
+
+  int pri = getpriority(PRIO_PROCESS, 0);
+  setpriority(PRIO_PROCESS, 0, 0);
+  I("estimate_delay, niceness: %d=>%d", pri, getpriority(PRIO_PROCESS, 0));
+
   I("start estimate_delay, #%d", ++cnt);
 
   short far[MAX_DELAY * FRAME_SAMPS];
@@ -711,6 +721,13 @@ int playback(short *_farend, int samps, bool with_aec_analyze)
 
 int push(JNIEnv *env, jshortArray farend)
 {
+  static int64_t last_push = 0;
+
+  if(last_push > 0 && timestamp(last_push) > FRAME_MS * 10) {
+    W("push() too slow: %"PRId64"ms since last call", timestamp(last_push));
+  }
+  last_push = timestamp(0);
+
   if (!farend_buf)
     return 0;
 

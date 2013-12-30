@@ -58,7 +58,7 @@ class delay_estimator {
   int get_far_samps() { return total_far_samps; }
   int get_near_samps() { return total_near_samps; }
   int is_processing();
-  static bool silent(short *data, int samps);
+  static bool silent(short *data, int samps, short threshold_amp);
 
   //------------------------------------------------------------
   private:
