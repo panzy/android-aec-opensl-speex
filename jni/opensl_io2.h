@@ -32,8 +32,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <SLES/OpenSLES.h>
 #include <SLES/OpenSLES_Android.h>
+#include <SLES/OpenSLES_AndroidConfiguration.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <assert.h>
+#include <pthread.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -60,6 +63,8 @@ typedef struct opensl_stream {
   SLPlayItf bqPlayerPlay;
   SLAndroidSimpleBufferQueueItf bqPlayerBufferQueue;
   SLEffectSendItf bqPlayerEffectSend;
+  SLint32 bqPlayerStreamType;
+  pthread_mutex_t bqPlayerCloseLock;
 
   // recorder interfaces
   SLObjectItf recorderObject;
@@ -97,6 +102,16 @@ typedef struct opensl_stream {
   Close the audio device 
   */
   void android_CloseAudioDevice(OPENSL_STREAM *p);
+  // opens the OpenSL ES device for output
+  //
+  // streamType - Audio playback stream type, see SL_ANDROID_STREAM_* constants in
+  //              <SLES/OpenSLES_AndroidConfiguration.h>, eg,
+  //              SL_ANDROID_STREAM_VOICE,
+  //              SL_ANDROID_STREAM_MEDIA.
+  SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType);
+  void openSLPlayClose(OPENSL_STREAM *p);
+  SLint32 openSLPlayQueryStreamType(OPENSL_STREAM *p);
+
   /* 
   Read a buffer from the OpenSL stream *p, of size samples. Returns the number of samples read.
   */

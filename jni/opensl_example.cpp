@@ -75,6 +75,7 @@ void speex_ec_open (int sampleRate, int bufsize, int totalSize);
 void speex_ec_close ();
 int playback(short *_farend, int samps, bool with_aec_analyze);
 float *to_float(short *frame);
+void set_playback_stream_type(jint stream_type);
 
 //--------------------------------------------------------------------------------
 
@@ -527,6 +528,19 @@ void runNearendProcessing()
 int get_estimated_echo_delay()
 {
   return echo_delay2 >= 0 ? echo_delay2 * FRAME_MS : -1;
+}
+
+jint get_playback_stream_type()
+{
+  return p ? openSLPlayQueryStreamType(p) : -1;
+}
+
+void set_playback_stream_type(jint stream_type)
+{
+  if (p) {
+    openSLPlayClose(p);
+    openSLPlayOpen(p, (SLint32)stream_type);
+  }
 }
 
 void stop()

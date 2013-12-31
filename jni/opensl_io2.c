@@ -56,7 +56,12 @@ static SLresult openSLCreateEngine(OPENSL_STREAM *p)
 }
 
 // opens the OpenSL ES device for output
-static SLresult openSLPlayOpen(OPENSL_STREAM *p)
+//
+// streamType - Audio playback stream type, see SL_ANDROID_STREAM_* constants in
+//              <SLES/OpenSLES_AndroidConfiguration.h>, eg,
+//              SL_ANDROID_STREAM_VOICE,
+//              SL_ANDROID_STREAM_MEDIA.
+SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType)
 {
   SLresult result;
   SLuint32 sr = p->sr;
@@ -131,11 +136,23 @@ static SLresult openSLPlayOpen(OPENSL_STREAM *p)
     SLDataSink audioSnk = {&loc_outmix, NULL};
 
     // create audio player
-    const SLInterfaceID ids1[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE};
-    const SLboolean req1[] = {SL_BOOLEAN_TRUE};
+    const SLInterfaceID ids1[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE, SL_IID_ANDROIDCONFIGURATION};
+    const SLboolean req1[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
     result = (*p->engineEngine)->CreateAudioPlayer(p->engineEngine, &(p->bqPlayerObject), &audioSrc, &audioSnk,
-						   1, ids1, req1);
+						   2, ids1, req1);
     if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+    // set stream type
+    p->bqPlayerStreamType = streamType;
+    SLAndroidConfigurationItf playerConfig;
+    result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject,
+        SL_IID_ANDROIDCONFIGURATION, &playerConfig);
+    assert(SL_RESULT_SUCCESS == result);
+    if (SL_RESULT_SUCCESS == result) {
+      result = (*playerConfig)->SetConfiguration(playerConfig,
+          SL_ANDROID_KEY_STREAM_TYPE, &streamType, sizeof(SLint32));
+      assert(SL_RESULT_SUCCESS == result);
+    }
 
     // realize the player
     result = (*p->bqPlayerObject)->Realize(p->bqPlayerObject, SL_BOOLEAN_FALSE);
@@ -168,6 +185,45 @@ static SLresult openSLPlayOpen(OPENSL_STREAM *p)
     return result;
   }
   return SL_RESULT_SUCCESS;
+}
+
+void openSLPlayClose(OPENSL_STREAM *p){
+
+  // destroy buffer queue audio player object, and invalidate all associated interfaces
+  if (0 == pthread_mutex_trylock(&p->bqPlayerCloseLock)) {
+    if (p->bqPlayerObject != NULL) {
+      SLuint32 state = SL_PLAYSTATE_PLAYING;
+      (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_STOPPED);
+      while(state != SL_PLAYSTATE_STOPPED)
+        (*p->bqPlayerPlay)->GetPlayState(p->bqPlayerPlay, &state);
+      (*p->bqPlayerObject)->Destroy(p->bqPlayerObject);
+      p->bqPlayerObject = NULL;
+      p->bqPlayerPlay = NULL;
+      p->bqPlayerBufferQueue = NULL;
+      p->bqPlayerEffectSend = NULL;
+    }
+    pthread_mutex_unlock(&p->bqPlayerCloseLock);
+  }
+}
+
+SLint32 openSLPlayQueryStreamType(OPENSL_STREAM *p) {
+#if 1
+  return p->bqPlayerStreamType;
+#else
+  SLAndroidConfigurationItf playerConfig;
+  SLint32 result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject,
+      SL_IID_ANDROIDCONFIGURATION, &playerConfig);
+  assert(SL_RESULT_SUCCESS == result);
+  if (SL_RESULT_SUCCESS == result) {
+    SLint32 streamType;
+    SLint32 valueSize = sizeof(SLint32);
+    result = (*playerConfig)->GetConfiguration(playerConfig,
+        SL_ANDROID_KEY_STREAM_TYPE, &valueSize, &streamType);
+    assert(SL_RESULT_SUCCESS == result);
+    return streamType;
+  }
+  return -1;
+#endif
 }
 
 // Open the OpenSL ES device for input
@@ -283,17 +339,7 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
 static void openSLDestroyEngine(OPENSL_STREAM *p){
 
   // destroy buffer queue audio player object, and invalidate all associated interfaces
-  if (p->bqPlayerObject != NULL) {
-    SLuint32 state = SL_PLAYSTATE_PLAYING;
-    (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_STOPPED);
-    while(state != SL_PLAYSTATE_STOPPED)
-      (*p->bqPlayerPlay)->GetPlayState(p->bqPlayerPlay, &state);
-    (*p->bqPlayerObject)->Destroy(p->bqPlayerObject);
-    p->bqPlayerObject = NULL;
-    p->bqPlayerPlay = NULL;
-    p->bqPlayerBufferQueue = NULL;
-    p->bqPlayerEffectSend = NULL;
-  }
+  openSLPlayClose(p);
 
   // destroy audio recorder object, and invalidate all associated interfaces
   if (p->recorderObject != NULL) {
@@ -334,6 +380,7 @@ OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
   p->inchannels = inchannels;
   p->outchannels = outchannels;
   p->sr = sr;
+  pthread_mutex_init(&p->bqPlayerCloseLock, NULL);
  
   if((p->outBufSamples  =  out_buffer_frames*outchannels) != 0) {
     if((p->outputBuffer = (short *) calloc(p->outBufSamples, sizeof(short))) == NULL) {
@@ -368,7 +415,7 @@ OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
     return NULL;
   } 
 
-  if(openSLPlayOpen(p) != SL_RESULT_SUCCESS) {
+  if(openSLPlayOpen(p, SL_ANDROID_STREAM_MEDIA) != SL_RESULT_SUCCESS) {
     android_CloseAudioDevice(p);
     return NULL;
   }  
@@ -408,6 +455,7 @@ void android_CloseAudioDevice(OPENSL_STREAM *p){
   free_circular_buffer(p->inrb);
   free_circular_buffer(p->outrb);
 
+  pthread_mutex_destroy(&p->bqPlayerCloseLock);
   free(p);
 }
 

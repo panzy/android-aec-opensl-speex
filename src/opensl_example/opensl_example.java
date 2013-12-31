@@ -41,4 +41,12 @@ public class opensl_example {
     opensl_exampleJNI.offline_process();
   }
 
+  public static void set_playback_stream_type(int stream_type) {
+    opensl_exampleJNI.set_playback_stream_type(stream_type);
+  }
+
+  public static int get_playback_stream_type() {
+    return opensl_exampleJNI.get_playback_stream_type();
+  }
+
 }
