@@ -295,12 +295,23 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
 
     // create audio recorder
     // (requires the RECORD_AUDIO permission)
-    const SLInterfaceID id[1] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE};
-    const SLboolean req[1] = {SL_BOOLEAN_TRUE};
+    const SLInterfaceID id[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE, SL_IID_ANDROIDCONFIGURATION};
+    const SLboolean req[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
     result = (*p->engineEngine)->CreateAudioRecorder(p->engineEngine, &(p->recorderObject), &audioSrc,
-						     &audioSnk, 1, id, req);
+						     &audioSnk, 2, id, req);
     if (SL_RESULT_SUCCESS != result) goto end_recopen;
 
+    SLAndroidConfigurationItf recorderConfig;   
+    result = (*p->recorderObject)->GetInterface(p->recorderObject, SL_IID_ANDROIDCONFIGURATION, &recorderConfig);
+    if(result == SL_RESULT_SUCCESS) {
+      SLint32 streamType = SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION;
+      //SLint32 apiLvl = 9;// TODO query
+      //if(apiLvl >= 14){
+      //  streamType = SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION;
+      //}
+      result = (*recorderConfig)->SetConfiguration(recorderConfig, SL_ANDROID_KEY_RECORDING_PRESET, &streamType, sizeof(SLint32));
+    }
+     
     // realize the audio recorder
     result = (*p->recorderObject)->Realize(p->recorderObject, SL_BOOLEAN_FALSE);
     if (SL_RESULT_SUCCESS != result) goto end_recopen;
@@ -326,7 +337,7 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
 
     (*p->recorderBufferQueue)->Enqueue(p->recorderBufferQueue, 
 				       p->recBuffer, p->inBufSamples*sizeof(short));
-     
+
   end_recopen: 
     return result;
   }
