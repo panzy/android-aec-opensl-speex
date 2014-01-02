@@ -56,16 +56,6 @@ const int SPEEX_FILTER_SIZE = 10;
 
 #define TAG "aec" // log tag
 
-#define DUMP_RAW 0
-#if DUMP_RAW
-#define DUMP_SAMPS(p,f,n) fwrite_samps(p,f,n)
-#else
-#define DUMP_SAMPS(p,f,n) (0)
-#endif
-
-//--------------------------------------------------------------------------------
-
-
 //--------------------------------------------------------------------------------
 
 void cleanup();
@@ -120,6 +110,8 @@ bool echo_delay2_desired = false;
 int64_t last_est_time = 0; // last time we got |echo_delay2|
 int in_buffer_cnt = 0;
 int out_buffer_cnt = 0;
+
+bool dump_raw = false;
 
 //----------------------------------------------------------------------
 
@@ -180,17 +172,17 @@ void open_log_files()
 
 void open_dump_files(const char *mode)
 {
-#if DUMP_RAW
-  int r = mkdir("/mnt/sdcard/tmp", 755);
-  if (r == 0 || errno == EEXIST) {
-    fd_farend = fopen("/mnt/sdcard/tmp/far.raw", mode);
-    fd_nearend = fopen("/mnt/sdcard/tmp/near.raw", mode);
-    fd_echo = fopen("/mnt/sdcard/tmp/echo.raw", mode);
-    fd_send = fopen("/mnt/sdcard/tmp/send.raw", mode);
-  } else {
-    fd_farend = fd_nearend = fd_echo = fd_send = NULL;
+  if (dump_raw) {
+    int r = mkdir("/mnt/sdcard/tmp", 755);
+    if (r == 0 || errno == EEXIST) {
+      fd_farend = fopen("/mnt/sdcard/tmp/far.raw", mode);
+      fd_nearend = fopen("/mnt/sdcard/tmp/near.raw", mode);
+      fd_echo = fopen("/mnt/sdcard/tmp/echo.raw", mode);
+      fd_send = fopen("/mnt/sdcard/tmp/send.raw", mode);
+    } else {
+      fd_farend = fd_nearend = fd_echo = fd_send = NULL;
+    }
   }
-#endif
 }
 
 void close_log_files()
@@ -205,23 +197,24 @@ void close_log_files()
 
 void close_dump_files()
 {
-#if DUMP_RAW
-  if (fd_farend)
-    fclose(fd_farend);
-  if (fd_nearend)
-    fclose(fd_nearend);
-  if (fd_echo)
-    fclose(fd_echo);
-  if (fd_send)
-    fclose(fd_send);
-#endif
+  if (dump_raw) {
+    if (fd_farend)
+      fclose(fd_farend);
+    if (fd_nearend)
+      fclose(fd_nearend);
+    if (fd_echo)
+      fclose(fd_echo);
+    if (fd_send)
+      fclose(fd_send);
+  }
   fd_farend = fd_nearend = fd_echo = fd_send = NULL;
   I("dump files closed");
 }
 
 void start(jint track_min_buf_size, jint record_min_buf_size,
-    jint playback_delay_ms, jint echo_delay_ms)
+    jint playback_delay_ms, jint echo_delay_ms, jint _dump_raw)
 {
+  dump_raw = _dump_raw;
   playback_delay = playback_delay_ms / FRAME_MS;
   //
   // 设置变量：
@@ -492,9 +485,11 @@ void runNearendProcessing()
           fwrite_samps(inbuffer, fd_nearend2, samps);
           logged_samps += samps;
         }
-        DUMP_SAMPS(inbuffer, fd_nearend, samps);
-        DUMP_SAMPS(refbuf, fd_echo, samps);
-        DUMP_SAMPS(out, fd_send, samps);
+        if (dump_raw) {
+          fwrite_samps(inbuffer, fd_nearend, samps);
+          fwrite_samps(refbuf, fd_echo, samps);
+          fwrite_samps(out, fd_send, samps);
+        }
       } else {
         D("record nothing at @%"PRId64"ms", timestamp(t0));
         break;
@@ -733,7 +728,9 @@ int playback(short *_farend, int samps, bool with_aec_analyze)
 
   // render
   write_circular_buffer(echo_buf, _farend, samps);
-  DUMP_SAMPS(_farend, fd_farend, samps);
+  if (dump_raw) {
+    fwrite_samps(_farend, fd_farend, samps);
+  }
   return android_AudioOut(p,_farend,samps);
 }
 

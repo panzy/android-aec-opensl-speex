@@ -49,7 +49,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * 给它的 farend 是原样的还是经过underrun修正的。
  * */
 void start(jint audio_track_min_buf_size, jint audio_record_min_buf_size,
-    jint playback_delay_ms, jint echo_delay_ms);
+    jint playback_delay_ms, jint echo_delay_ms, jint _dump_raw = 0);
 /* 持续处理录音。*/
 void runNearendProcessing();
 /* 结束播放和录音。*/

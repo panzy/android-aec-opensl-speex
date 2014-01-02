@@ -213,7 +213,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
         };
 
         int echo_delay_ms = getSharedPreferences("aec", 0).getInt("echo_delay_ms", -1);
-        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms);
+        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms, 1);
         thread.start();
         thread2.start();
         thread3.start();
