@@ -502,8 +502,8 @@ void runNearendProcessing()
             }
           }
           // reopen speex
-          speex_ec_close();
-          speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * SPEEX_FILTER_SIZE);
+          //speex_ec_close();
+          //speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * SPEEX_FILTER_SIZE);
           echo_delay = echo_delay2;
         }
         read_circular_buffer(echo_buf, refbuf, samps);
@@ -557,7 +557,9 @@ void runNearendProcessing()
         //D("idle: sleep %"PRId64"ms", total_ahead);
         usleep(1000 * total_ahead);
       } else if (total_ahead < -0 * FRAME_MS) {
-        // 这个很严重，播放有破音，回声消除可能从此失败
+        // 这个很严重，播放有破音，回声消除可能从此失效一段时间。
+        // 发生这个情况的原因是循环体的本次运行中某个操作耗时太长，导致播放队列
+        // 见底了。
         E("idle: total overrun for %dms! at %ds", (int)(-total_ahead),
             (int)(timestamp(t0) / 1000));
       }
