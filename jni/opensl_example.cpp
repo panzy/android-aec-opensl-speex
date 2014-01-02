@@ -37,6 +37,10 @@
 #define WEBRTC_SPECTRUM_MS (WEBRTC_SPECTRUM_SIZE * FRAME_MS / FRAME_SAMPS)
 #define WEBRTC_HISTORY_SIZE ((1500 / 1000) * SR * SAMPLE_SIZE)
 
+// 在主循环中，将控制连续处理 |LOOP_FRAMES|*|FRAME_SAMPS| 所需的时间，使之趋于
+// |LOOP_FRAMES|*|FRAME_MS|。
+const int LOOP_FRAMES = 8;
+
 const int MAX_DELAY = 50;
 const int NEAREND_SIZE = 50; // 太短可能会得到完全错误的结果（取决于实际输入）
 // 回声延迟（以frame为单位）的有效值 >= 0，下面是几个特殊的无效值
@@ -284,23 +288,29 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
   in_buffer_cnt = ceil((float)record_min_buf_size / sample_size / FRAME_SAMPS);
   out_buffer_cnt = ceil((float)track_min_buf_size / sample_size / FRAME_SAMPS);
 
-  // 太小的 out_buffer_cnt （比如3） 不足以保证流畅的播放。
-  const int min_buffer_cnt = 20;
-
   I("AudioRecord min buf size %dB, AudioTrack min buf size %dB",
       record_min_buf_size, track_min_buf_size);
   I("OpenSL audio in-buffer samps %dx%d, out-buffer samps %dx%d, echo delay %d(x%d=%dms)",
       FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt,
       echo_delay, FRAME_MS, echo_delay * FRAME_MS);
 
+  // 确保 runNearendProcessing() 从一开始就能读取到录音数据
+  int sleep_ms = FRAME_MS * (in_buffer_cnt + 1);
+
+  // 太小的 out_buffer_cnt （比如3） 不足以保证流畅的播放。
+  const int min_buffer_cnt = LOOP_FRAMES * 4;
+  if (out_buffer_cnt < min_buffer_cnt)
+    out_buffer_cnt = min_buffer_cnt;
+  if (in_buffer_cnt < min_buffer_cnt)
+    in_buffer_cnt = min_buffer_cnt;
+
   p = android_OpenAudioDevice(SR, 1, 1,
       FRAME_SAMPS,
-      std::max(min_buffer_cnt, in_buffer_cnt),
+      in_buffer_cnt,
       FRAME_SAMPS,
-      std::max(min_buffer_cnt, out_buffer_cnt));
+      out_buffer_cnt);
   if(p == NULL) return; 
-  // 确保 runNearendProcessing() 从一开始就能读取到录音数据
-  usleep(1000 * FRAME_MS * (in_buffer_cnt + 1));
+  usleep(1000 * sleep_ms);
 
   farend_buf_size =  FRAME_SAMPS * std::max(FRAME_RATE * 5, 20 + playback_delay);
   farend_buf = create_circular_buffer(farend_buf_size);
@@ -362,7 +372,6 @@ void runNearendProcessing()
   // |min_ahead| 不能太小，否则就令 opensl_stream::outrb 失去了缓冲效果。
   //
   // elapse tolerance in frames
-  const int ELAPSE_TOL = 4;
   int max_ahead = (out_buffer_cnt - 2) * FRAME_MS; // (int)(out_buffer_cnt * 3 / 4) * FRAME_MS;
   int min_ahead = max_ahead - 1 * FRAME_MS;// std::max(max_ahead / 2, 5 * FRAME_MS);
   I("main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
@@ -452,20 +461,9 @@ void runNearendProcessing()
           memset(render_buf, 0, FRAME_SAMPS * 2);
       }
     }
-    if (timestamp(play_proc_start) >= FRAME_MS * ELAPSE_TOL / 2) {
+    if (timestamp(play_proc_start) >= FRAME_MS * LOOP_FRAMES / 2) {
       E("playback processing lasts too long: %"PRId64"ms",
           timestamp(play_proc_start));
-    }
-
-    // 平衡 rendered_samps 与物理时间
-    //int64_t total_ahead = (loop_idx * FRAME_MS) - timestamp(t0);
-    int64_t total_ahead = (rendered_samps / FRAME_SAMPS * FRAME_MS) - timestamp(t0);
-    if (total_ahead > max_ahead) {
-      total_ahead = total_ahead - min_ahead;
-      //D("idle: sleep %"PRId64"ms", total_ahead);
-      usleep(1000 * total_ahead);
-    } else if (total_ahead < -0 * FRAME_MS) {
-      E("idle: total overrun for %"PRId64"ms!", -total_ahead);
     }
 
     //
@@ -473,7 +471,7 @@ void runNearendProcessing()
     //
     int64_t rec_proc_start = timestamp(0);
     int lack_cap_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - captured_samps;
-    if (lack_cap_samps >= FRAME_SAMPS * ELAPSE_TOL) {
+    if (lack_cap_samps >= FRAME_SAMPS * LOOP_FRAMES) {
       W("record overrun, lack_cap_samps %d", lack_cap_samps);
     }
     int loop_cnt = 0;
@@ -540,17 +538,30 @@ void runNearendProcessing()
         D("record nothing at @%"PRId64"ms", timestamp(t0));
         break;
       }
-      if (timestamp(rec_proc_start) > FRAME_MS * ELAPSE_TOL / 4)
+      if (timestamp(rec_proc_start) > FRAME_MS * LOOP_FRAMES / 2)
         break;
     }
-    if (timestamp(rec_proc_start) >= FRAME_MS * ELAPSE_TOL) {
+    if (timestamp(rec_proc_start) >= FRAME_MS * LOOP_FRAMES) {
       E("record processing lasts too long: %"PRId64"ms for %d loops",
           timestamp(rec_proc_start), loop_cnt);
     }
 
+    // 平衡 |rendered_samps| 与物理时间
+    if (lack_cap_samps < FRAME_SAMPS)
+    {
+      int64_t total_ahead = (rendered_samps / FRAME_SAMPS * FRAME_MS) - timestamp(t0);
+      if (total_ahead > max_ahead) {
+        total_ahead = total_ahead - min_ahead;
+        //D("idle: sleep %"PRId64"ms", total_ahead);
+        usleep(1000 * total_ahead);
+      } else if (total_ahead < -0 * FRAME_MS) {
+        E("idle: total overrun for %"PRId64"ms!", -total_ahead);
+      }
+    }
+
     // log time elapse
     if (1) {
-      int64_t curr_ahead = FRAME_MS * ELAPSE_TOL - timestamp(t1);
+      int64_t curr_ahead = FRAME_MS * LOOP_FRAMES - timestamp(t1);
       if (curr_ahead >= 0) {
         D("idle: curr %"PRId64"ms", curr_ahead);
       } else {
