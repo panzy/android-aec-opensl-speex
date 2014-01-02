@@ -255,10 +255,6 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
 
   // 太小的 out_buffer_cnt （比如3） 不足以保证流畅的播放。
   const int min_buffer_cnt = 20;
-  if (out_buffer_cnt < min_buffer_cnt) out_buffer_cnt = min_buffer_cnt;
-  // 尚未观测到 in_buffer_cnt 太小的直接影响，不过为了简化主循环中控制 ahead 时
-  // 间的逻辑，这里也强制 in_buffer_cnt 不小于一个阈值。
-  if (in_buffer_cnt < min_buffer_cnt) in_buffer_cnt = min_buffer_cnt;
 
   I("AudioRecord min buf size %dB, AudioTrack min buf size %dB",
       record_min_buf_size, track_min_buf_size);
@@ -266,8 +262,14 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
       FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt,
       echo_delay, FRAME_MS, echo_delay * FRAME_MS);
 
-  p = android_OpenAudioDevice(SR, 1, 1, FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt);
+  p = android_OpenAudioDevice(SR, 1, 1,
+      FRAME_SAMPS,
+      std::max(min_buffer_cnt, in_buffer_cnt),
+      FRAME_SAMPS,
+      std::max(min_buffer_cnt, out_buffer_cnt));
   if(p == NULL) return; 
+  // 确保 runNearendProcessing() 从一开始就能读取到录音数据
+  usleep(1000 * FRAME_MS * (in_buffer_cnt + 1));
 
   farend_buf_size =  FRAME_SAMPS * std::max(FRAME_RATE * 5, 20 + playback_delay);
   farend_buf = create_circular_buffer(farend_buf_size);
@@ -392,6 +394,7 @@ void runNearendProcessing()
     //
     // playback
     //
+    int64_t play_proc_start = timestamp(0);
     if (loop_idx < playback_delay) {
       playback(silence, FRAME_SAMPS, false);
       rendered_samps += FRAME_SAMPS;
@@ -416,6 +419,11 @@ void runNearendProcessing()
           memset(render_buf, 0, FRAME_SAMPS * 2);
       }
     }
+    if (timestamp(play_proc_start) >= FRAME_MS * ELAPSE_TOL / 2) {
+      E("playback processing lasts too long: %"PRId64"ms",
+          timestamp(play_proc_start));
+    }
+
     // 平衡 rendered_samps 与物理时间
     //int64_t total_ahead = (loop_idx * FRAME_MS) - timestamp(t0);
     int64_t total_ahead = (rendered_samps / FRAME_SAMPS * FRAME_MS) - timestamp(t0);
@@ -757,7 +765,6 @@ int push(JNIEnv *env, jshortArray farend)
   if (warn_elapse == 0) {
     warn_elapse = farend_buf_size / FRAME_SAMPS * FRAME_MS / 2;
   }
-
 
   if(last_push > 0 && timestamp(last_push) > warn_elapse) {
     W("push() too slow: %"PRId64"ms since last call", timestamp(last_push));
