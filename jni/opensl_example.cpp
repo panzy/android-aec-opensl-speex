@@ -53,8 +53,10 @@ const int MAX_LOG_SAMPS = FRAME_SAMPS * (MAX_DELAY * 3);
 const int ECHO_DELAY_INTERVAL_MS = 30 * 1000;
 
 // delay tolerance in frames.
-// 这个值跟回声延迟的波动幅度有关。
-const int DELAY_TOL = 2;
+// 如果新评估的回声延迟值不大于当前正在使用的延迟值加上此容差，则不作调整。
+// 因为每次调整后的一段短暂时间里回声消除都会失效，所以想减少调整。
+// 理论上此值小于 |SPEEX_FILTER_SIZE| 就行了。
+const int DELAY_TOL = 6;
 // speex AEC filter size in frame
 const int SPEEX_FILTER_SIZE = 10;
 
@@ -129,7 +131,11 @@ bool dump_raw = false;
 void adjust_echo_delay2(int value)
 {
   if (value >= 0) {
-    echo_delay2 = value - DELAY_TOL;
+    if (echo_delay <= echo_delay2 && echo_delay + DELAY_TOL > echo_delay2) {
+      echo_delay2 = echo_delay;
+    } else {
+      echo_delay2 = value - DELAY_TOL;
+    }
   } else {
     echo_delay2 = ECHO_DELAY_FAILED;
   }
@@ -484,7 +490,8 @@ void runNearendProcessing()
 
         // adjust echo buffer, and read a frame for current AEC
         if (echo_delay2 >= 0 && echo_delay2 != echo_delay) {
-          I("adjust echo buffer: %d=>%d", echo_delay, echo_delay2);
+          I("adjust echo buffer: %d=>%d at %ds", echo_delay, echo_delay2,
+              (int)(timestamp(t0) / 1000));
           if (echo_delay >= 0) {
             if (echo_delay2 > echo_delay) {
               for (int i = 0, n = echo_delay2 - echo_delay; i < n; ++i) {
@@ -720,7 +727,7 @@ int estimate_delay(int async)
         I("estimate_delay, output early");
         echo_delay2 = result - DELAY_TOL;
         echo_delay2_desired = false;
-      } else if (result >= echo_delay && result <= echo_delay + DELAY_TOL * 2) {
+      } else if (result >= echo_delay && result <= echo_delay + DELAY_TOL) {
         // 这个结果与 |echo_delay| 基本一致，那么二者都正确的可能性比较高，无需
         // 继续验证了。
         I("estimate_delay, end early");
