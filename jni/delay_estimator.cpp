@@ -16,6 +16,9 @@
 
 #define TAG "aec_est" // log tag
 
+// delay_estimator::echo_cancel() 中是否总是重新初始化speex？
+#define REOPEN_SPEEX 0
+
 const int SEARCH_STEP = 1;
 
 // get timestamp of today in ms.
@@ -60,7 +63,9 @@ void delay_estimator::echo_cancel(short *in, short *ref, int samps,
 {
   // XXX 由于我们要查找的delay是精确到单个frame的，speex 的 filter length 为
   // 1xframe即可（1xframe 比 2xframe 快大约 20%）
+#if REOPEN_SPEEX 
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 1);
+#endif
 
   short *p1 = in, *p2 = ref, *p3 = out;
   int n = samps;
@@ -73,7 +78,9 @@ void delay_estimator::echo_cancel(short *in, short *ref, int samps,
     n -= FRAME_SAMPS;
   }
 
+#if REOPEN_SPEEX 
   speex_ec_close();
+#endif
 
   if (cancellation_ratio) {
     int sum1 = 0, sum2 = 0;
@@ -290,6 +297,10 @@ int delay_estimator::process(int hint)
   int result = -1;
   if (processing)
   {
+#if !REOPEN_SPEEX 
+    speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 1);
+#endif
+
     // take snapshot of farend and nearend buffer
     int total_far_samps_ = 0;
     int total_near_samps_ = 0;
@@ -427,6 +438,10 @@ int delay_estimator::process(int hint)
       delete[] far;
     if (near)
       delete[] near;
+
+#if !REOPEN_SPEEX 
+    speex_ec_close();
+#endif
   }
 
   return result;
