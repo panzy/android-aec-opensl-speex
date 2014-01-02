@@ -153,7 +153,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
                                 }
                             } else {
                                 while (opensl_example.push(buf) != FRAME_SAMPS) {
-                                    sleep(FRAME_MS);
+                                    sleep(FRAME_MS / 2);
                                 }
                             }
 
@@ -201,8 +201,8 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
                                     .asShortBuffer().put(buf);
                             fos.write(bytes);
                         } else {
+                            sleep(FRAME_MS / 2);
                         }
-                        sleep(FRAME_MS);
                     }
                     fos.close();
                 } catch (FileNotFoundException e) {
