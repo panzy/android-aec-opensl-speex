@@ -76,7 +76,7 @@ delay_estimator *delayEst = NULL;
 pthread_t delay_est_thrd;
 bool delay_est_thrd_stopped;
 
-static int on;
+static int on = 0;
 OPENSL_STREAM  *p = NULL;
 
 // 远端信号缓冲区。由于无法保证上层调用push()的节奏，需要此缓冲区来为OpenSL层提
@@ -563,6 +563,11 @@ int estimate_delay(int async)
 {
   static int cnt = -1;
 
+  // 全局变量 |on| 的初衷是用来控制 runNearendProcessing() 的，
+  // estimate_delay() 既可以被 runNearendProcessing() 调用，也可以直接调用，
+  // 仅在前一种情况中，它受 |on| 控制。
+  bool watch_on = on;
+
   int pri = getpriority(PRIO_PROCESS, 0);
   setpriority(PRIO_PROCESS, 0, 0);
   I("estimate_delay, niceness: %d=>%d", pri, getpriority(PRIO_PROCESS, 0));
@@ -589,7 +594,7 @@ int estimate_delay(int async)
   int inertance = 0;
   bool echo_delay2_adjusted = false;
   fseek(fd_n, i * FRAME_SAMPS * 2, SEEK_SET);
-  while(on)
+  while(!watch_on || on)
   {
     if (FRAME_SAMPS != fread(far, 2, FRAME_SAMPS, fd_f))
       break;
