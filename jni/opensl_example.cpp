@@ -39,7 +39,7 @@
 
 // 在主循环中，将控制连续处理 |LOOP_FRAMES|*|FRAME_SAMPS| 所需的时间，使之趋于
 // |LOOP_FRAMES|*|FRAME_MS|。
-const int LOOP_FRAMES = 8;
+const int LOOP_FRAMES = 4;
 
 const int MAX_DELAY = 50;
 const int NEAREND_SIZE = 50; // 太短可能会得到完全错误的结果（取决于实际输入）
@@ -297,12 +297,15 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
   // 确保 runNearendProcessing() 从一开始就能读取到录音数据
   int sleep_ms = FRAME_MS * (in_buffer_cnt + 1);
 
-  // 太小的 out_buffer_cnt （比如3） 不足以保证流畅的播放。
-  const int min_buffer_cnt = LOOP_FRAMES * 4;
-  if (out_buffer_cnt < min_buffer_cnt)
-    out_buffer_cnt = min_buffer_cnt;
-  if (in_buffer_cnt < min_buffer_cnt)
-    in_buffer_cnt = min_buffer_cnt;
+  // 太小的 out_buffer_cnt （比如3） 不足以保证流畅的播放，因为播放队列缓冲的
+  // 数据太少，主循环稍有迟滞就会导致播放数据供应不足。根据经验，缓冲500~1000ms
+  // 比较保保险。
+  const int min_outbuf_cnt = 50;
+  const int min_inbuf_cnt = 20;
+  if (out_buffer_cnt < min_outbuf_cnt)
+    out_buffer_cnt = min_outbuf_cnt;
+  if (in_buffer_cnt < min_inbuf_cnt)
+    in_buffer_cnt = min_inbuf_cnt;
 
   p = android_OpenAudioDevice(SR, 1, 1,
       FRAME_SAMPS,
@@ -359,10 +362,7 @@ void runNearendProcessing()
   // 大多数情况下我们只需要比如说3ms就处理完了一个frame，但是偶尔（进程调度？）
   // 也会需要明显超过 FRAME_MS 的毫秒数。
   // 所以我们能做的是在一个更大的时间跨度上让实际流逝时间与音频时间大体上保持一致
-  // ，这个偏差要在相关缓冲区的承受范围之内，具体来说：
-  // A. 循环不能太快，否则从 opensl_stream::inrb 可能读不到数据，以及
-  // nearend_buf 中的未读数据会被覆盖；
-  // B. 但也不能太慢，否则 opensl_stream::outrb 中的未读数据会被覆盖。
+  // ，这个偏差要在相关缓冲区的承受范围之内。
   //
   // 另外，AudioSystem record buffer overflow 好像也跟这个有关。
   //
@@ -370,8 +370,6 @@ void runNearendProcessing()
   //    ahead = 物理时长 - 已处理的音频的时长
   // 然后在循环体中试图将 |ahead| 维持在 [min_ahead, max_ahead] 区间内。
   // |min_ahead| 不能太小，否则就令 opensl_stream::outrb 失去了缓冲效果。
-  //
-  // elapse tolerance in frames
   int max_ahead = (out_buffer_cnt - 2) * FRAME_MS; // (int)(out_buffer_cnt * 3 / 4) * FRAME_MS;
   int min_ahead = max_ahead - 1 * FRAME_MS;// std::max(max_ahead / 2, 5 * FRAME_MS);
   I("main loop time ahead target range: (%d,%d)ms, or (%d,%d)frames",
@@ -462,7 +460,7 @@ void runNearendProcessing()
       }
     }
     if (timestamp(play_proc_start) >= FRAME_MS * LOOP_FRAMES / 2) {
-      E("playback processing lasts too long: %"PRId64"ms",
+      W("playback processing lasts too long: %"PRId64"ms",
           timestamp(play_proc_start));
     }
 
@@ -536,18 +534,22 @@ void runNearendProcessing()
         }
       } else {
         D("record nothing at @%"PRId64"ms", timestamp(t0));
+        // reset |captured_samps| according real time.
+        captured_samps += lack_cap_samps;
+        lack_cap_samps = 0;
         break;
       }
       if (timestamp(rec_proc_start) > FRAME_MS * LOOP_FRAMES / 2)
         break;
     }
     if (timestamp(rec_proc_start) >= FRAME_MS * LOOP_FRAMES) {
-      E("record processing lasts too long: %"PRId64"ms for %d loops",
+      W("record processing lasts too long: %"PRId64"ms for %d loops",
           timestamp(rec_proc_start), loop_cnt);
     }
 
-    // 平衡 |rendered_samps| 与物理时间
-    if (lack_cap_samps < FRAME_SAMPS)
+    // 平衡 |rendered_samps| 与物理时间。
+    // (|captured_samps| 与物理时间的冲突通过在特定条件下重置|captured_samps|来
+    // 解决。）
     {
       int64_t total_ahead = (rendered_samps / FRAME_SAMPS * FRAME_MS) - timestamp(t0);
       if (total_ahead > max_ahead) {
@@ -555,7 +557,9 @@ void runNearendProcessing()
         //D("idle: sleep %"PRId64"ms", total_ahead);
         usleep(1000 * total_ahead);
       } else if (total_ahead < -0 * FRAME_MS) {
-        E("idle: total overrun for %"PRId64"ms!", -total_ahead);
+        // 这个很严重，播放有破音，回声消除可能从此失败
+        E("idle: total overrun for %dms! at %ds", (int)(-total_ahead),
+            (int)(timestamp(t0) / 1000));
       }
     }
 
@@ -565,7 +569,7 @@ void runNearendProcessing()
       if (curr_ahead >= 0) {
         D("idle: curr %"PRId64"ms", curr_ahead);
       } else {
-        E("idle: curr overrun for %"PRId64"ms!", -curr_ahead);
+        W("idle: curr overrun for %"PRId64"ms!", -curr_ahead);
       }
     }
   }
