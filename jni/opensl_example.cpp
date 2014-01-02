@@ -61,6 +61,7 @@ const int SPEEX_FILTER_SIZE = 10;
 void cleanup();
 bool estimation_not_bad(delay_estimator *d);
 void fwrite_samps(short *frame, FILE *fd, int samps);
+void reverse_frame(short *frame, int samps);
 void speex_ec_open (int sampleRate, int bufsize, int totalSize);
 void speex_ec_close ();
 int playback(short *_farend, int samps, bool with_aec_analyze);
@@ -130,16 +131,46 @@ void adjust_echo_delay2(int value)
   }
 }
 
-// fill_with - a frame to fill with.
-void align_farend_buf(int n, short *fill_with) {
+void align_farend_buf(int n, short *last_render_frame, int last_render_samps)
+{
+  // 如果用静音帧来补充，会有破音，进而对录音和回声消除产生严重影响，但是如果用
+  // 上一帧补充，有可能产生音量很大的嗡鸣，这可能是由于波形上的锯齿，想象
+  // |last_render_frame| 是一个水平放置的梯形，为了避免锯齿，创建一个该梯形的副
+  // 本并且将其旋转180度。
+  const int PAD_SAMPS = 80; // padding samps
+  short rframe[PAD_SAMPS]; // reversed frame
+  if (last_render_samps > PAD_SAMPS) {
+    last_render_frame += last_render_samps - PAD_SAMPS;
+    last_render_samps -= PAD_SAMPS;
+  }
+  memcpy(rframe, last_render_frame, last_render_samps * sizeof(short));
+  reverse_frame(rframe, last_render_samps);
+  short *p = rframe;
   while (n > 0) {
-    if (n <= FRAME_SAMPS) {
-      playback(fill_with, n, true);
+    if (n <= last_render_samps) {
+      playback(p, n, true);
       n = 0;
     } else {
-      playback(fill_with, FRAME_SAMPS, true);
-      n -= FRAME_SAMPS;
+      playback(p, last_render_samps, true);
+      n -= last_render_samps;
     }
+    if (p == rframe) {
+      p = last_render_frame;
+    } else {
+      p = rframe;
+    }
+  }
+}
+
+void reverse_frame(short *frame, int samps)
+{
+  short t;
+  for (short *p = frame, *q = frame + samps - 1;
+      p <= q;
+      ++p, --q) {
+    t = *p;
+    *p = *q;
+    *q = t;
   }
 }
 
@@ -411,9 +442,11 @@ void runNearendProcessing()
       lack_samps += 2 * FRAME_SAMPS; // 不但不应该紧缺，还应该有点富余
       if (lack_samps > 0) {
         D("playback underrun, lack of %d samps", lack_samps);
-        // 如果用静音帧来补充，会有破音，进而对录音和回声消除产生严重影响，
-        // 但是如果用上一帧补充，有可能产生音量很大的嗡鸣，更坏。
-        align_farend_buf(lack_samps, silence);
+        if (samps > 0) {
+          align_farend_buf(lack_samps, render_buf, samps);
+        } else {
+          align_farend_buf(lack_samps, silence, FRAME_SAMPS);
+        }
         rendered_samps += lack_samps;
         if (lack_samps >= FRAME_SAMPS)
           memset(render_buf, 0, FRAME_SAMPS * 2);
