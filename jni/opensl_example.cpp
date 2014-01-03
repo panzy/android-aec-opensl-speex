@@ -300,9 +300,6 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
       FRAME_SAMPS, in_buffer_cnt, FRAME_SAMPS, out_buffer_cnt,
       echo_delay, FRAME_MS, echo_delay * FRAME_MS);
 
-  // 确保 runNearendProcessing() 从一开始就能读取到录音数据
-  int sleep_ms = FRAME_MS * (in_buffer_cnt + 1);
-
   // 太小的 out_buffer_cnt （比如3） 不足以保证流畅的播放，因为播放队列缓冲的
   // 数据太少，主循环稍有迟滞就会导致播放数据供应不足。根据经验，缓冲500~1000ms
   // 比较保保险。
@@ -319,7 +316,6 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
       FRAME_SAMPS,
       out_buffer_cnt);
   if(p == NULL) return; 
-  usleep(1000 * sleep_ms);
 
   farend_buf_size =  FRAME_SAMPS * std::max(FRAME_RATE * 5, 20 + playback_delay);
   farend_buf = create_circular_buffer(farend_buf_size);
