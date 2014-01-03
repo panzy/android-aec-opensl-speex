@@ -56,7 +56,7 @@ const int ECHO_DELAY_INTERVAL_MS = 30 * 1000;
 // 如果新评估的回声延迟值不大于当前正在使用的延迟值加上此容差，则不作调整。
 // 因为每次调整后的一段短暂时间里回声消除都会失效，所以想减少调整。
 // 理论上此值小于 |SPEEX_FILTER_SIZE| 就行了。
-const int DELAY_TOL = 6;
+const int DELAY_TOL = 4;
 // speex AEC filter size in frame
 const int SPEEX_FILTER_SIZE = 10;
 
