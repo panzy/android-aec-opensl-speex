@@ -303,7 +303,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
   // 太小的 out_buffer_cnt （比如3） 不足以保证流畅的播放，因为播放队列缓冲的
   // 数据太少，主循环稍有迟滞就会导致播放数据供应不足。根据经验，缓冲500~1000ms
   // 比较保保险。
-  const int min_outbuf_cnt = 50;
+  const int min_outbuf_cnt = 100;
   const int min_inbuf_cnt = 20;
   if (out_buffer_cnt < min_outbuf_cnt)
     out_buffer_cnt = min_outbuf_cnt;
