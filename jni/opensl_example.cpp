@@ -484,13 +484,13 @@ void runNearendProcessing()
       int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
       if (samps == FRAME_SAMPS) {
         if (captured_samps == 0) 
-          D("first time of capture at @%"PRId64"ms", timestamp(t0));
+          D("first time of capture at @%ds", (int)(timestamp(t0) / 1000));
         captured_samps += samps;
         lack_cap_samps -= samps;
 
         // adjust echo buffer, and read a frame for current AEC
         if (echo_delay2 >= 0 && echo_delay2 != echo_delay) {
-          I("adjust echo buffer: %d=>%d at %ds", echo_delay, echo_delay2,
+          I("adjust echo buffer: %d=>%d at @%ds", echo_delay, echo_delay2,
               (int)(timestamp(t0) / 1000));
           if (echo_delay >= 0) {
             if (echo_delay2 > echo_delay) {
@@ -540,13 +540,14 @@ void runNearendProcessing()
           fwrite_samps(out, fd_send, samps);
         }
       } else {
-        D("record nothing at @%"PRId64"ms", timestamp(t0));
+        D("record nothing at @%ds", (int)(timestamp(t0) / 1000));
         // reset |captured_samps| according real time.
+        I("reset captured_samps at @%ds", (int)(timestamp(t0) / 1000));
         captured_samps += lack_cap_samps;
         lack_cap_samps = 0;
         break;
       }
-      if (timestamp(rec_proc_start) > FRAME_MS * LOOP_FRAMES / 2)
+      if (timestamp(t0) > FRAME_MS * LOOP_FRAMES / 2)
         break;
     }
     if (timestamp(rec_proc_start) >= FRAME_MS * LOOP_FRAMES) {
@@ -567,7 +568,7 @@ void runNearendProcessing()
         // 这个很严重，播放有破音，回声消除可能从此失效一段时间。
         // 发生这个情况的原因是循环体的本次运行中某个操作耗时太长，导致播放队列
         // 见底了。
-        E("idle: total overrun for %dms! at %ds", (int)(-total_ahead),
+        E("idle: total overrun for %dms! at @%ds", (int)(-total_ahead),
             (int)(timestamp(t0) / 1000));
       }
     }
