@@ -37,10 +37,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <unistd.h>
 #include <assert.h>
 #include <pthread.h>
+#include "common.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 
 typedef struct _circular_buffer {
   short *buffer;

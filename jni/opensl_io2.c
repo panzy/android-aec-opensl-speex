@@ -29,6 +29,8 @@
 
 #include "opensl_io2.h"
 
+#define TAG "aec_opensl"
+
 static void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context);
 static void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context);
 circular_buffer* create_circular_buffer(int count);
@@ -481,7 +483,9 @@ void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
   OPENSL_STREAM *p = (OPENSL_STREAM *) context;
   int count = p->inBufSamples;
-  write_circular_buffer(p->inrb, p->recBuffer,count);
+  if (write_circular_buffer(p->inrb, p->recBuffer,count) < count) {
+    E("record buffer overflow");
+  }
   (*p->recorderBufferQueue)->Enqueue(p->recorderBufferQueue,p->recBuffer,
           count*sizeof(short));
 }
