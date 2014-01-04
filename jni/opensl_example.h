@@ -62,7 +62,10 @@ int push(JNIEnv *env, jshortArray buf);
  * buf: a frame of samples.
  * return: 0 or buf.len */
 int pull(JNIEnv *env, jshortArray buf);
-int estimate_delay(int async);
+/* @param use_mem_data bool(1/0)，数据来自内存（全局变量 |far_est_buf| 和
+ * |near_est_buf|）还是文件（raw2.raw 和 near2.raw）？
+ */
+int estimate_delay(int use_mem_data);
 /* 获取动态评估的回声延迟。
  * 请在 runNearendProcessing() 结束后调用。
  * return echo delay in ms, -1 if the value is unavailable.

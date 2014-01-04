@@ -46,9 +46,6 @@ const int NEAREND_SIZE = 50; // 太短可能会得到完全错误的结果（取
 // 回声延迟（以frame为单位）的有效值 >= 0，下面是几个特殊的无效值
 const int ECHO_DELAY_NULL = -1;
 const int ECHO_DELAY_FAILED = -2;
-// 我们是周期性、间歇地把远、近端信号写到日志文件供评估回声延迟的，
-// 写满 MAX_LOG_SAMPS 就暂停日志并开始分析……
-const int MAX_LOG_SAMPS = FRAME_SAMPS * (MAX_DELAY * 3);
 // ……下次估算回声延迟的时间间隔，或者说估算结果的有效期
 const int ECHO_DELAY_INTERVAL_MS = 30 * 1000;
 
@@ -123,6 +120,16 @@ int in_buffer_cnt = 0;
 int out_buffer_cnt = 0;
 
 bool dump_raw = false;
+
+// 用于评估回声延迟的缓冲区
+const int EST_BUF_CAPACITY = MAX_DELAY * 5 * FRAME_SAMPS;
+short far_est_buf[EST_BUF_CAPACITY];
+short near_est_buf[EST_BUF_CAPACITY];
+// 以下指针指向以上缓冲区的当前写入位置。
+short *far_est_p = NULL;
+short *near_est_p = NULL;
+int far_est_size = 0;
+int near_est_size = 0;
 
 //----------------------------------------------------------------------
 
@@ -204,6 +211,7 @@ void fwrite_samps(short *frame, FILE *fd, int samps)
   }
 }
 
+// TODO rename to open_est_dump_files
 void open_log_files()
 {
   I("open_log_files");
@@ -232,6 +240,7 @@ void open_dump_files(const char *mode)
   }
 }
 
+// TODO rename to close_est_dump_files
 void close_log_files()
 {
   I("close_log_files");
@@ -335,6 +344,8 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
   on = 1;
   t_start = timestamp(0);
   delay_est_thrd_stopped = true;
+  far_est_p = near_est_p = NULL;
+  far_est_size = near_est_size = 0;
 
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
   D("start at %" PRId64 "ms" , t_start); 
@@ -417,19 +428,25 @@ void runNearendProcessing()
         && (last_est_time == 0
           || timestamp(last_est_time) > ECHO_DELAY_INTERVAL_MS)) {
       // 周期性地写音频日志
-      if (fd_nearend2 == NULL) {
+      if (!near_est_p) {
         logged_samps = 0;
         if (!delay_estimator::silent(render_buf, FRAME_SAMPS, 2500)) {
-          open_log_files();
+          near_est_p = near_est_buf;
+          far_est_p = far_est_buf;
+          far_est_size = near_est_size = 0;
+          if (dump_raw)
+            open_log_files();
           near_log_countdown = checkspace_circular_buffer(p->outrb, 0);
         }
       }
       // 音频日志长度够了就关闭并开始用它分析回声延迟
-      else if (logged_samps > MAX_LOG_SAMPS) {
-        close_log_files();
+      else if (logged_samps > EST_BUF_CAPACITY) {
+        far_est_p = near_est_p = NULL;
+        if (dump_raw)
+          close_log_files();
         far_log_started = false;
         delay_est_thrd_stopped = false;
-        pthread_create(&delay_est_thrd, NULL, (void* (*)(void*))estimate_delay, 0);
+        pthread_create(&delay_est_thrd, NULL, (void* (*)(void*))estimate_delay, (void*)1);
       }
     }
 
@@ -526,10 +543,16 @@ void runNearendProcessing()
         if (samps != write_circular_buffer(nearend_buf, out, samps)) {
           E("nearend_buf full");
         }
-        if (far_log_started && fd_nearend2
+        if (far_log_started && near_est_p
             && (near_log_countdown <= 0
               || (near_log_countdown -= samps) <= 0)) {
-          fwrite_samps(inbuffer, fd_nearend2, samps);
+          if (EST_BUF_CAPACITY - near_est_size >= samps) {
+            memcpy(near_est_p, inbuffer, samps * 2);
+            near_est_p += samps;
+            near_est_size += samps;
+          }
+          if (dump_raw)
+            fwrite_samps(inbuffer, fd_nearend2, samps);
           logged_samps += samps;
         }
         if (dump_raw) {
@@ -575,7 +598,7 @@ void runNearendProcessing()
     if (1) {
       int64_t curr_ahead = FRAME_MS * LOOP_FRAMES - timestamp(t1);
       if (curr_ahead >= 0) {
-        D("idle: curr %"PRId64"ms", curr_ahead);
+        //D("idle: curr %"PRId64"ms", curr_ahead);
       } else {
         W("idle: curr overrun for %"PRId64"ms!", -curr_ahead);
       }
@@ -628,9 +651,11 @@ void cleanup()
   I("clean up");
 }
 
-int estimate_delay(int async)
+int estimate_delay(int use_mem_data)
 {
   static int cnt = -1;
+  float cancel_ratio = 1;
+  int result = -1;
 
   int pri = getpriority(PRIO_PROCESS, 0);
   setpriority(PRIO_PROCESS, 0, 0);
@@ -639,23 +664,24 @@ int estimate_delay(int async)
   I("start estimate_delay, #%d", ++cnt);
 
   int64_t t0 = timestamp(0);
-  short far[MAX_DELAY * 5 * FRAME_SAMPS];
-  short near[MAX_DELAY * 5 * FRAME_SAMPS];
-  delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
 
-  FILE *fd_f = fopen("/mnt/sdcard/tmp/far2.raw", "r");
-  FILE *fd_n = fopen("/mnt/sdcard/tmp/near2.raw", "r");
-  if (!fd_f || !fd_n) {
+  if (!use_mem_data) { // use file data
+    FILE *fd_f = fopen("/mnt/sdcard/tmp/far2.raw", "r");
+    FILE *fd_n = fopen("/mnt/sdcard/tmp/near2.raw", "r");
+    if (!fd_f || !fd_n) {
       E("failed to open dump files at %d", __LINE__ );
-      return 0;
+      goto END;
+    }
+    far_est_size = fread(far_est_buf, 2, sizeof(far_est_buf) / 2, fd_f);
+    near_est_size = fread(near_est_buf, 2, sizeof(near_est_buf) / 2, fd_n);
+    fclose(fd_f);
+    fclose(fd_n);
   }
 
-  int far_size = fread(far, 2, sizeof(far) / 2, fd_f);
-  int near_size = fread(near, 2, sizeof(near) / 2, fd_n);
-  float cancel_ratio = 1;
-  int result = delayEst->estimate(
-      far, far_size,
-      near, near_size,
+  delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
+  result = delayEst->estimate(
+      far_est_buf, far_est_size,
+      near_est_buf, near_est_size,
       FRAME_SAMPS * 8,
       &cancel_ratio );
   if (result >= 0) {
@@ -663,17 +689,19 @@ int estimate_delay(int async)
     adjust_echo_delay2(result);
   }
 
+END:
+
   I("delay estimation done, result %d(%dms), cancellation ratio %0.2f, "
       "elapse %dms",
       result, result * FRAME_MS, cancel_ratio, (int)timestamp(t0));
   I("got echo_delay2 %d", echo_delay2);
 
-  fclose(fd_f);
-  fclose(fd_n);
   if (delayEst) {
     delete delayEst;
     delayEst = NULL;
   }
+
+  far_est_p = near_est_p = NULL;
   delay_est_thrd_stopped = true;
   last_est_time = timestamp(0);
   return 0;
@@ -852,8 +880,14 @@ float *to_float(short *frame)
 int playback(short *_farend, int samps, bool with_aec_analyze)
 {
   // analyze
-  if (with_aec_analyze && fd_farend2) {
-    fwrite_samps(_farend, fd_farend2, samps);
+  if (with_aec_analyze && far_est_p) {
+    if (EST_BUF_CAPACITY - far_est_size >= samps) {
+      memcpy(far_est_p, _farend, samps * 2);
+      far_est_p += samps;
+      far_est_size += samps;
+    }
+    if (dump_raw)
+      fwrite_samps(_farend, fd_farend2, samps);
   }
 
   // render
