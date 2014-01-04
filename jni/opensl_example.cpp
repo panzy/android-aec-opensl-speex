@@ -131,7 +131,9 @@ bool dump_raw = false;
 void adjust_echo_delay2(int value)
 {
   if (value >= 0) {
-    if (echo_delay <= echo_delay2 && echo_delay + DELAY_TOL > echo_delay2) {
+    if (echo_delay != ECHO_DELAY_NULL
+        && echo_delay <= echo_delay2
+        && echo_delay + DELAY_TOL > echo_delay2) {
       echo_delay2 = echo_delay;
     } else {
       echo_delay2 = value - DELAY_TOL;
@@ -627,6 +629,57 @@ void cleanup()
 }
 
 int estimate_delay(int async)
+{
+  static int cnt = -1;
+
+  int pri = getpriority(PRIO_PROCESS, 0);
+  setpriority(PRIO_PROCESS, 0, 0);
+  I("estimate_delay, niceness: %d=>%d", pri, getpriority(PRIO_PROCESS, 0));
+
+  I("start estimate_delay, #%d", ++cnt);
+
+  int64_t t0 = timestamp(0);
+  short far[MAX_DELAY * 5 * FRAME_SAMPS];
+  short near[MAX_DELAY * 5 * FRAME_SAMPS];
+  delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
+
+  FILE *fd_f = fopen("/mnt/sdcard/tmp/far2.raw", "r");
+  FILE *fd_n = fopen("/mnt/sdcard/tmp/near2.raw", "r");
+  if (!fd_f || !fd_n) {
+      E("failed to open dump files at %d", __LINE__ );
+      return 0;
+  }
+
+  int far_size = fread(far, 2, sizeof(far) / 2, fd_f);
+  int near_size = fread(near, 2, sizeof(near) / 2, fd_n);
+  float cancel_ratio = 1;
+  int result = delayEst->estimate(
+      far, far_size,
+      near, near_size,
+      FRAME_SAMPS * 8,
+      &cancel_ratio );
+  if (result >= 0) {
+    result /= FRAME_SAMPS; // convert from samples to frames
+    adjust_echo_delay2(result);
+  }
+
+  I("delay estimation done, result %d(%dms), cancellation ratio %0.2f, "
+      "elapse %dms",
+      result, result * FRAME_MS, cancel_ratio, (int)timestamp(t0));
+  I("got echo_delay2 %d", echo_delay2);
+
+  fclose(fd_f);
+  fclose(fd_n);
+  if (delayEst) {
+    delete delayEst;
+    delayEst = NULL;
+  }
+  delay_est_thrd_stopped = true;
+  last_est_time = timestamp(0);
+  return 0;
+}
+
+int estimate_delay_bak(int async)
 {
   static int cnt = -1;
 

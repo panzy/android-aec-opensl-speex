@@ -58,7 +58,7 @@ void delay_estimator::speex_ec_close ()
   }
 }
 
-void delay_estimator::echo_cancel(short *in, short *ref, int samps,
+void delay_estimator::echo_cancel(const short *in, const short *ref, int samps,
         short *out, float *cancellation_ratio)
 {
   // XXX 由于我们要查找的delay是精确到单个frame的，speex 的 filter length 为
@@ -67,7 +67,8 @@ void delay_estimator::echo_cancel(short *in, short *ref, int samps,
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * 1);
 #endif
 
-  short *p1 = in, *p2 = ref, *p3 = out;
+  const short *p1 = in, *p2 = ref;
+  short *p3 = out;
   int n = samps;
   while (n >= FRAME_SAMPS) {
     speex_echo_cancellation(st, p1, p2, p3);
@@ -451,3 +452,76 @@ int delay_estimator::score_delay(int delay)
 {
   return delay_quality[delay] * 100 + delay_hits[delay]; 
 }
+
+int delay_estimator::estimate(const short *far, int far_size,
+    const short *near, int near_size,
+    int filter_size, float *cancel_ratio) 
+{
+  return estimate_(far, far_size, near, near_size, filter_size,
+      0, cancel_ratio);
+}
+
+int delay_estimator::estimate_(const short *far, int far_size,
+    const short *near, int near_size,
+    int filter_size, int base, float *cancel_ratio) 
+{
+  const static int MIN_FILTER_SIZE = 4 * FRAME_SAMPS;
+  D("delay_estimator::estimate(far,%d,near,%d,%d,%d)",
+      far_size / FRAME_SAMPS,
+      near_size / FRAME_SAMPS,
+      filter_size / FRAME_SAMPS, base / FRAME_SAMPS);
+
+  int n = near_size / filter_size;
+  if (n < 1) {
+    return base;
+  }
+
+  int min_idx = -1;
+  for (int i = 0; i < n; ++i) {
+    float ratio = try_echo_cancel(
+        far,
+        far_size,
+        near + i * filter_size,
+        near_size - i * filter_size,
+        filter_size);
+    if (ratio < 0.9 && (min_idx < 0 || ratio < *cancel_ratio)) {
+      min_idx = i;
+      *cancel_ratio = ratio;
+    }
+  }
+
+  if (min_idx < 0) {
+    return -1;
+  }
+
+  if (filter_size / 2 < MIN_FILTER_SIZE) {
+    return min_idx * filter_size + base;
+  }
+
+  return estimate_(
+      far, 
+      far_size,
+      near + min_idx * filter_size,
+      near_size - min_idx * filter_size,
+      filter_size / 2,
+      base + min_idx * filter_size,
+      cancel_ratio);
+}
+
+float delay_estimator::try_echo_cancel(
+    const short *far, int far_size,
+    const short *near, int near_size,
+    int filter_size)
+{
+  speex_ec_open(SR, FRAME_SAMPS, filter_size);
+  int samps = far_size > near_size ? near_size : far_size;
+  float ratio = 1;
+  short *out = new short[samps];
+  echo_cancel(near, far, samps, out, &ratio);
+  delete[] out;
+  speex_ec_close();
+  D("delay_estimator::try_echo_cancel(,,,,%d) => %0.2f",
+      filter_size / FRAME_SAMPS, ratio);
+  return ratio;
+}
+

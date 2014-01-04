@@ -60,16 +60,37 @@ class delay_estimator {
   int is_processing();
   static bool silent(short *data, int samps, short threshold_amp);
 
+  // Estimate echo delay.
+  //
+  // @param far farend samples.
+  // @param far_size sample count.
+  // @param near nearend samples.
+  // @param near_size sample count.
+  // @param filter_size Speex AEC filter size in samples.
+  // @param cancel_ratio output cancellation ratio.
+  // @return echo delay in samples.
+  int estimate(const short *far, int far_size,
+          const short *near, int near_size,
+          int filter_size, float *cancel_ratio);
   //------------------------------------------------------------
   private:
 
   int64_t timestamp(int64_t base);
   void speex_ec_open (int sampleRate, int bufsize, int totalSize);
   void speex_ec_close ();
-  void echo_cancel(short *in, short *ref, int samps,
-      short *out, float *cancellation_ratio);
-  int search_audio(short *haystack, int haystack_samps, short *needle, int needle_samps, float *quality);
+  void echo_cancel(const short *in, const short *ref, int samps,
+          short *out, float *cancellation_ratio);
+  // recursive helper of estimate().
+  int estimate_(const short *far, int far_size,
+          const short *near, int near_size,
+          int filter_size, int base, float *cancel_ratio);
+  int search_audio(short *haystack, int haystack_samps,
+          short *needle, int needle_samps, float *quality);
   int score_delay(int delay);
+  float try_echo_cancel(
+          const short *far, int far_size,
+          const short *near, int near_size,
+          int filter_size);
 
   // treat |dst| array as a FIFO queue.
   // return shorts been pushed |n|.
