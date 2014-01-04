@@ -58,7 +58,7 @@ class delay_estimator {
   int get_far_samps() { return total_far_samps; }
   int get_near_samps() { return total_near_samps; }
   int is_processing();
-  static bool silent(short *data, int samps, short threshold_amp);
+  static bool silent(const short *data, int samps, short threshold_amp);
 
   // Estimate echo delay.
   //
@@ -84,9 +84,13 @@ class delay_estimator {
   int estimate_(const short *far, int far_size,
           const short *near, int near_size,
           int filter_size, int base, float *cancel_ratio);
+  // 判断缓冲区里是否有足够的非静音信号来试验回声消除。
+  bool rich_nearend(const short *near, int near_size);
   int search_audio(short *haystack, int haystack_samps,
           short *needle, int needle_samps, float *quality);
   int score_delay(int delay);
+  // 返回nearend在回声消除后、前的信号强度之比，此值越小于1，意味着回声消除效果越
+  // 好。通常 < 0.9 就意味着回声消除已经起作用了。
   float try_echo_cancel(
           const short *far, int far_size,
           const short *near, int near_size,

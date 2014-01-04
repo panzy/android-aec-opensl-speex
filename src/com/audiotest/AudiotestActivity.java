@@ -59,7 +59,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
     private static final String far_filename = output_dir + "/far.raw";
     private static final String near_filename = output_dir + "/near.raw";
     private static final String echo_filename = output_dir + "/echo.raw";
-    private static final String send_filename = output_dir + "/send.raw";
+    private static final String send_filename = output_dir + "/out.raw";
 
     private static final String TAG = "java";
     private static final int SR = 8000; // sample rate
@@ -192,7 +192,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
                 try {
                     short[] buf = new short[FRAME_SAMPS];
                     byte[] bytes = new byte[FRAME_SAMPS * 2];
-                    FileOutputStream fos = new FileOutputStream("/mnt/sdcard/tmp/out.raw");
+                    FileOutputStream fos = new FileOutputStream(send_filename);
                     while(thread != null) {
                         int n = opensl_example.pull(buf);
                         if (n > 0) {
@@ -213,7 +213,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
         };
 
         int echo_delay_ms = getSharedPreferences("aec", 0).getInt("echo_delay_ms", -1);
-        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms, 1);
+        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms, 0);
         thread.start();
         thread2.start();
         thread3.start();

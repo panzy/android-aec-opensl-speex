@@ -33,7 +33,7 @@ int64_t delay_estimator::timestamp(int64_t base)
  * threshold_amp - threshold amplitude, recommanded value: 2500 for farend, 1000
  * for nearend.
  */
-bool delay_estimator::silent(short *data, int samps, short threshold_amp)
+bool delay_estimator::silent(const short *data, int samps, short threshold_amp)
 {
   for (int i = 0; i < samps; ++i) {
     // 由于自然语音的特点，仅凭一个不平凡的采样就可以认为这一帧“有声音”。
@@ -458,20 +458,39 @@ int delay_estimator::estimate(const short *far, int far_size,
     int filter_size, float *cancel_ratio) 
 {
   return estimate_(far, far_size, near, near_size, filter_size,
-      0, cancel_ratio);
+      -1, cancel_ratio);
 }
 
+// @param base |near|相对于第一次调用时的偏移量——这是个递归算法。
+//              第一次调用时，请传递 －1。
 int delay_estimator::estimate_(const short *far, int far_size,
     const short *near, int near_size,
     int filter_size, int base, float *cancel_ratio) 
 {
-  const static int MIN_FILTER_SIZE = 4 * FRAME_SAMPS;
+  // Speex AEC filter length.
+  // 决定了搜索的细致程度，或者说最终结果的精度。
+  const static int MIN_FILTER_SIZE = 2 * FRAME_SAMPS;
+
+  // 传递给 try_echo_cancel() 的 |near| 的最小长度，
+  const static int MIN_NEAR_SIZE = 10 * FRAME_SAMPS;
+
+  // 传递给 try_echo_cancel() 的 |near| 的最大长度，
+  const static int MAX_NEAR_SIZE = 100 * FRAME_SAMPS;
+
   D("delay_estimator::estimate(far,%d,near,%d,%d,%d)",
       far_size / FRAME_SAMPS,
       near_size / FRAME_SAMPS,
       filter_size / FRAME_SAMPS, base / FRAME_SAMPS);
 
-  int n = near_size / filter_size;
+  // 尝试 |n| 个回声延迟值，相邻两个值的差距是 |filter_size|。
+  // 
+  // 这些值是相对于 |base| 的。
+  //
+  // 如果这不是递归的第一层，那么我们的尝试范围仅限于上一次所选择的回声延迟值的
+  // 范围，恰好是上一次的 |filter_size|，也就是本次 |filter_size|x2。
+  int n = base < 0
+    ? (near_size - MIN_NEAR_SIZE) / filter_size
+    : 2;
   if (n < 1) {
     return base;
   }
@@ -482,7 +501,7 @@ int delay_estimator::estimate_(const short *far, int far_size,
         far,
         far_size,
         near + i * filter_size,
-        near_size - i * filter_size,
+        std::min(MAX_NEAR_SIZE, near_size - i * filter_size),
         filter_size);
     if (ratio < 0.9 && (min_idx < 0 || ratio < *cancel_ratio)) {
       min_idx = i;
@@ -491,13 +510,17 @@ int delay_estimator::estimate_(const short *far, int far_size,
   }
 
   if (min_idx < 0) {
-    return -1;
+    return base;
   }
 
+  if (base < 0)
+    base = 0;
+
+  // 得到了回声延迟值，我们可以就此返回，也可以在它所指示的范围内采用更精细的
+  // filter size 来寻找更精确的值。
   if (filter_size / 2 < MIN_FILTER_SIZE) {
     return min_idx * filter_size + base;
   }
-
   return estimate_(
       far, 
       far_size,
@@ -513,6 +536,9 @@ float delay_estimator::try_echo_cancel(
     const short *near, int near_size,
     int filter_size)
 {
+  if (!rich_nearend(near, near_size))
+    return 1;
+
   speex_ec_open(SR, FRAME_SAMPS, filter_size);
   int samps = far_size > near_size ? near_size : far_size;
   float ratio = 1;
@@ -523,5 +549,35 @@ float delay_estimator::try_echo_cancel(
   D("delay_estimator::try_echo_cancel(,,,,%d) => %0.2f",
       filter_size / FRAME_SAMPS, ratio);
   return ratio;
+}
+
+bool delay_estimator::rich_nearend(const short *near, int near_size)
+{
+  // find max amplitude in nearend buf
+  short max_amp = 0;
+  for (int i = 0; i < near_size; ++i) {
+    if (max_amp < near[i]) {
+      max_amp = near[i];
+    } else if (-max_amp > near[i]) {
+      max_amp = -near[i];
+    }
+  }
+  //D("max amplitude in nearend: %d", max_amp);
+  if (max_amp < 1000)
+    return false;
+
+  // check if there're too many silent frames
+  const short *b = near;
+  for (int i = 0, n = near_size / FRAME_SAMPS, m = 0;
+      i < n;
+      ++i, b += FRAME_SAMPS) {
+    if (!silent(b, FRAME_SAMPS, max_amp / 4)) {
+      if (++m > 10) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 

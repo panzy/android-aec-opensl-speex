@@ -122,7 +122,7 @@ int out_buffer_cnt = 0;
 bool dump_raw = false;
 
 // 用于评估回声延迟的缓冲区
-const int EST_BUF_CAPACITY = MAX_DELAY * 5 * FRAME_SAMPS;
+const int EST_BUF_CAPACITY = MAX_DELAY * 3 * FRAME_SAMPS;
 short far_est_buf[EST_BUF_CAPACITY];
 short near_est_buf[EST_BUF_CAPACITY];
 // 以下指针指向以上缓冲区的当前写入位置。
@@ -315,7 +315,7 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
   // 数据太少，主循环稍有迟滞就会导致播放数据供应不足。根据经验，缓冲500~1000ms
   // 比较保保险。
   const int min_outbuf_cnt = 100;
-  const int min_inbuf_cnt = 20;
+  const int min_inbuf_cnt = 50;
   if (out_buffer_cnt < min_outbuf_cnt)
     out_buffer_cnt = min_outbuf_cnt;
   if (in_buffer_cnt < min_inbuf_cnt)
@@ -469,7 +469,7 @@ void runNearendProcessing()
       int lack_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - rendered_samps;
       lack_samps += 2 * FRAME_SAMPS; // 不但不应该紧缺，还应该有点富余
       if (lack_samps > 0) {
-        D("playback underrun, lack of %d samps", lack_samps);
+        //D("playback underrun, lack of %d samps", lack_samps);
         if (samps > 0) {
           align_farend_buf(lack_samps, render_buf, samps);
         } else {
@@ -658,7 +658,7 @@ int estimate_delay(int use_mem_data)
   int result = -1;
 
   int pri = getpriority(PRIO_PROCESS, 0);
-  setpriority(PRIO_PROCESS, 0, 0);
+  setpriority(PRIO_PROCESS, 0, -8);
   I("estimate_delay, niceness: %d=>%d", pri, getpriority(PRIO_PROCESS, 0));
 
   I("start estimate_delay, #%d", ++cnt);
