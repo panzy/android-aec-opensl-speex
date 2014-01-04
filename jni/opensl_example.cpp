@@ -47,7 +47,7 @@ const int NEAREND_SIZE = 50; // 太短可能会得到完全错误的结果（取
 const int ECHO_DELAY_NULL = -1;
 const int ECHO_DELAY_FAILED = -2;
 // ……下次估算回声延迟的时间间隔，或者说估算结果的有效期
-const int ECHO_DELAY_INTERVAL_MS = 30 * 1000;
+const int ECHO_DELAY_INTERVAL_MS = 20 * 1000;
 
 // delay tolerance in frames.
 // 如果新评估的回声延迟值不大于当前正在使用的延迟值加上此容差，则不作调整。
