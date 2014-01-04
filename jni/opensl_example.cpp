@@ -931,9 +931,11 @@ void speex_ec_open (int sampleRate, int bufsize, int totalSize)
   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_ECHO_STATE, st);
   int value_on = 1;
   int value_off = 0;
-  // AGC 会让回声变得模糊、放大。
+  // 绝对不能打开 AGC，它会让消除（减弱）后的回声变得模糊、放大。
   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_AGC, &value_off);
-  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value_on);
+  // 暂时用不到 VAD
+  speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_VAD, &value_off);
+  // DENOISE 稍微有点用处
   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_DENOISE, &value_on);
 }
 
@@ -955,18 +957,13 @@ void offline_process()
   const int TAIL = NN * 8;
    FILE *echo_fd, *ref_fd, *e_fd;
    short echo_buf[NN], ref_buf[NN], e_buf[NN];
-   SpeexEchoState *st;
-   SpeexPreprocessState *den;
    int sampleRate = 8000;
 
    ref_fd  = fopen("sdcard/tmp/near.raw", "rb");
    echo_fd = fopen("sdcard/tmp/echo.raw", "rb");
    e_fd    = fopen("sdcard/tmp/send.raw", "wb");
 
-   st = speex_echo_state_init(NN, TAIL);
-   den = speex_preprocess_state_init(NN, sampleRate);
-   speex_echo_ctl(st, SPEEX_ECHO_SET_SAMPLING_RATE, &sampleRate);
-   speex_preprocess_ctl(den, SPEEX_PREPROCESS_SET_ECHO_STATE, st);
+   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * SPEEX_FILTER_SIZE);
 
    while (!feof(ref_fd) && !feof(echo_fd))
    {
@@ -976,8 +973,7 @@ void offline_process()
       speex_preprocess_run(den, e_buf);
       fwrite(e_buf, sizeof(short), NN, e_fd);
    }
-   speex_echo_state_destroy(st);
-   speex_preprocess_state_destroy(den);
+   speex_ec_close();
    fclose(e_fd);
    fclose(echo_fd);
    fclose(ref_fd);
