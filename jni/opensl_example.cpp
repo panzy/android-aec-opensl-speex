@@ -144,8 +144,8 @@ void adjust_echo_delay2(int value)
 {
   if (value >= 0) {
     if (echo_delay != ECHO_DELAY_NULL
-        && echo_delay <= echo_delay2
-        && echo_delay + DELAY_TOL > echo_delay2) {
+        && echo_delay <= value
+        && echo_delay + DELAY_TOL > value) {
       echo_delay2 = echo_delay;
     } else {
       echo_delay2 = value - DELAY_TOL;
