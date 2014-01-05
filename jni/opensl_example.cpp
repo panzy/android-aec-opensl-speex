@@ -47,7 +47,7 @@ const int NEAREND_SIZE = 50; // 太短可能会得到完全错误的结果（取
 const int ECHO_DELAY_NULL = -1;
 const int ECHO_DELAY_FAILED = -2;
 // ……下次估算回声延迟的时间间隔，或者说估算结果的有效期
-const int ECHO_DELAY_INTERVAL_MS = 20 * 1000;
+const int ECHO_DELAY_INTERVAL_MS = 10 * 1000;
 
 // delay tolerance in frames.
 // 如果新评估的回声延迟值不大于当前正在使用的延迟值加上此容差，则不作调整。
@@ -98,6 +98,11 @@ circular_buffer *nearend_buf = NULL;
 int farend_buf_size = 0;
 int nearend_buf_size = 0;
 int echo_buf_size = 0;
+//
+// for delay estimation
+//
+circular_buffer *render_hist = NULL;
+circular_buffer *capture_hist = NULL;
 
 int64_t t_start;
 
@@ -122,7 +127,7 @@ int out_buffer_cnt = 0;
 bool dump_raw = false;
 
 // 用于评估回声延迟的缓冲区
-const int EST_BUF_CAPACITY = MAX_DELAY * 3 * FRAME_SAMPS;
+const int EST_BUF_CAPACITY = MAX_DELAY * 3 * FRAME_SAMPS; // in samps
 short far_est_buf[EST_BUF_CAPACITY];
 short near_est_buf[EST_BUF_CAPACITY];
 // 以下指针指向以上缓冲区的当前写入位置。
@@ -338,6 +343,11 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
   echo_buf_size = (MAX_DELAY /*+ playback_delay*/ + 4) * 2 * FRAME_SAMPS;
   echo_buf = create_circular_buffer(echo_buf_size);
 
+  int hist_size = EST_BUF_CAPACITY + 1 
+    + out_buffer_cnt * FRAME_SAMPS;
+  render_hist = create_circular_buffer(hist_size);
+  capture_hist = create_circular_buffer(hist_size);
+
   speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * SPEEX_FILTER_SIZE);
 
   open_dump_files("w+");
@@ -403,19 +413,6 @@ void runNearendProcessing()
   int loop_idx = -1;
   int rendered_samps = 0;
   int captured_samps = 0;
-  int logged_samps = 0;
-  bool far_log_started = false;
-  // 我们将要计算的回声延迟不包含 struct opensl_stream 的回放缓冲区内的音频数据
-  // 的长度。
-  //
-  // 换言之，回声延迟作为一个时间差，它的起点是音频帧被提交给 OpenSL Audio
-  // Player 的时刻（这一层又有一个缓冲区，但是我们已经让它足够小了因而可以忽略）
-  // ，而非音频帧通过 opensl_stream::android_AudioOut() 被添加到struct
-  // opensl_stream 的缓冲区的时刻。
-  //
-  // 刚开始写 farend log 时，|near_log_countdown| 被设置为 struct
-  // opensl_stream::outrb 的内容长度，nearend log 将跳过与之等量的数据才开始写。
-  int near_log_countdown = 0; // in samps
   int64_t t0 = timestamp(0), t1 = 0; // loop body begins
   while(on) {
     t1 = timestamp(0);
@@ -424,31 +421,45 @@ void runNearendProcessing()
     //
     // estimate echo delay
     //
-    if (loop_idx > playback_delay && delay_est_thrd_stopped
-        && (last_est_time == 0
-          || timestamp(last_est_time) > ECHO_DELAY_INTERVAL_MS)) {
-      // 周期性地写音频日志
-      if (!near_est_p) {
-        logged_samps = 0;
-        if (!delay_estimator::silent(render_buf, FRAME_SAMPS, 2500)) {
-          near_est_p = near_est_buf;
-          far_est_p = far_est_buf;
-          far_est_size = near_est_size = 0;
-          if (dump_raw)
+
+    // |render_hist| 和 |capture_hist| 必须按相同的进度 shift。
+    //
+    // 写满 |EST_BUF_CAPACITY| 就 shift 一次。
+    if (checkspace_circular_buffer(render_hist, 0) >= EST_BUF_CAPACITY
+        && checkspace_circular_buffer(capture_hist, 0) >= EST_BUF_CAPACITY) {
+
+      if (loop_idx > playback_delay
+          && delay_est_thrd_stopped
+          && (last_est_time == 0
+            || timestamp(last_est_time) > ECHO_DELAY_INTERVAL_MS)) {
+        if (1 || !delay_estimator::silent(render_buf, FRAME_SAMPS, 2500)) {
+          // copy data from |render_hist| and |capture_hist| 
+          // to |far_est_buf| and |near_est_buf|.
+          read_circular_buffer(render_hist, far_est_buf, EST_BUF_CAPACITY);
+          read_circular_buffer(capture_hist, near_est_buf, EST_BUF_CAPACITY);
+
+          far_est_size = near_est_size = EST_BUF_CAPACITY;
+          if (dump_raw) {
             open_log_files();
-          near_log_countdown = checkspace_circular_buffer(p->outrb, 0);
+            fwrite_samps(far_est_buf, fd_farend2, far_est_size);
+            fwrite_samps(near_est_buf, fd_nearend2, near_est_size);
+            close_log_files();
+          }
+
+          // start estimation thread
+          delay_est_thrd_stopped = false;
+          pthread_create(&delay_est_thrd, NULL, (void* (*)(void*))estimate_delay, (void*)1);
+        }
+      } else {
+        // discard
+        short tmp[FRAME_SAMPS];
+        for (int i = 0, n = EST_BUF_CAPACITY / FRAME_SAMPS; i < n; ++i) {
+          read_circular_buffer(render_hist, tmp, FRAME_SAMPS);
+          read_circular_buffer(capture_hist, tmp, FRAME_SAMPS);
         }
       }
-      // 音频日志长度够了就关闭并开始用它分析回声延迟
-      else if (logged_samps > EST_BUF_CAPACITY) {
-        far_est_p = near_est_p = NULL;
-        if (dump_raw)
-          close_log_files();
-        far_log_started = false;
-        delay_est_thrd_stopped = false;
-        pthread_create(&delay_est_thrd, NULL, (void* (*)(void*))estimate_delay, (void*)1);
-      }
     }
+
 
     //
     // playback
@@ -460,7 +471,6 @@ void runNearendProcessing()
     } else {
       int samps = read_circular_buffer(farend_buf, render_buf, FRAME_SAMPS);
       if (samps > 0) {
-        far_log_started = true;
         playback(render_buf, samps, true);
         rendered_samps += samps;
       }
@@ -503,6 +513,8 @@ void runNearendProcessing()
         captured_samps += samps;
         lack_cap_samps -= samps;
 
+        write_circular_buffer(capture_hist, inbuffer, samps);
+
         // adjust echo buffer, and read a frame for current AEC
         if (echo_delay2 >= 0 && echo_delay2 != echo_delay) {
           I("adjust echo buffer: %d=>%d at @%ds", echo_delay, echo_delay2,
@@ -542,18 +554,6 @@ void runNearendProcessing()
         // output
         if (samps != write_circular_buffer(nearend_buf, out, samps)) {
           E("nearend_buf full");
-        }
-        if (far_log_started && near_est_p
-            && (near_log_countdown <= 0
-              || (near_log_countdown -= samps) <= 0)) {
-          if (EST_BUF_CAPACITY - near_est_size >= samps) {
-            memcpy(near_est_p, inbuffer, samps * 2);
-            near_est_p += samps;
-            near_est_size += samps;
-          }
-          if (dump_raw)
-            fwrite_samps(inbuffer, fd_nearend2, samps);
-          logged_samps += samps;
         }
         if (dump_raw) {
           fwrite_samps(inbuffer, fd_nearend, samps);
@@ -641,6 +641,8 @@ void cleanup()
   free_circular_buffer(farend_buf);
   free_circular_buffer(echo_buf);
   free_circular_buffer(nearend_buf);
+  free_circular_buffer(render_hist);
+  free_circular_buffer(capture_hist);
   close_dump_files();
   speex_ec_close();
 
@@ -891,6 +893,7 @@ int playback(short *_farend, int samps, bool with_aec_analyze)
   }
 
   // render
+  write_circular_buffer(render_hist, _farend, samps);
   write_circular_buffer(echo_buf, _farend, samps);
   if (dump_raw) {
     fwrite_samps(_farend, fd_farend, samps);
