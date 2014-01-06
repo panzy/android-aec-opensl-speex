@@ -193,7 +193,7 @@ void openSLPlayClose(OPENSL_STREAM *p){
 
   // destroy buffer queue audio player object, and invalidate all associated interfaces
   if (0 == pthread_mutex_trylock(&p->bqPlayerCloseLock)) {
-    if (p->bqPlayerObject != NULL) {
+    if (p->bqPlayerObject != NULL && p->bqPlayerPlay != NULL) {
       SLuint32 state = SL_PLAYSTATE_PLAYING;
       (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_STOPPED);
       while(state != SL_PLAYSTATE_STOPPED)
