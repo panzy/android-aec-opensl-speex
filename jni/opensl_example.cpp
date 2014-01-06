@@ -48,6 +48,7 @@ const int ECHO_DELAY_NULL = -1;
 const int ECHO_DELAY_FAILED = -2;
 // ……下次估算回声延迟的时间间隔，或者说估算结果的有效期
 const int ECHO_DELAY_INTERVAL_MS = 10 * 1000;
+const int EST_BUF_CAPACITY = MAX_DELAY * 5 * FRAME_SAMPS; // in samps
 
 // delay tolerance in frames.
 // 如果新评估的回声延迟值不大于当前正在使用的延迟值加上此容差，则不作调整。
@@ -127,7 +128,6 @@ int out_buffer_cnt = 0;
 bool dump_raw = false;
 
 // 用于评估回声延迟的缓冲区
-const int EST_BUF_CAPACITY = MAX_DELAY * 3 * FRAME_SAMPS; // in samps
 short far_est_buf[EST_BUF_CAPACITY];
 short near_est_buf[EST_BUF_CAPACITY];
 // 以下指针指向以上缓冲区的当前写入位置。
