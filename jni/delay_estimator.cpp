@@ -457,6 +457,7 @@ int delay_estimator::estimate(const short *far, int far_size,
     const short *near, int near_size,
     int filter_size, float *cancel_ratio) 
 {
+  *cancel_ratio = 1;
   return estimate_(far, far_size, near, near_size, filter_size,
       -1, cancel_ratio);
 }
@@ -482,14 +483,15 @@ int delay_estimator::estimate_(const short *far, int far_size,
       near_size / FRAME_SAMPS,
       filter_size / FRAME_SAMPS, base / FRAME_SAMPS);
 
-  // 尝试 |n| 个回声延迟值，相邻两个值的差距是 |filter_size|。
+  // 尝试 |n| 个回声延迟值，相邻两个值的差距是 |step_size|。
   // 
   // 这些值是相对于 |base| 的。
   //
   // 如果这不是递归的第一层，那么我们的尝试范围仅限于上一次所选择的回声延迟值的
-  // 范围，恰好是上一次的 |filter_size|，也就是本次 |filter_size|x2。
+  // 范围，恰好是上一次的 |step_size|，也就是本次 |step_size|x2。
+  int step_size = filter_size / 2;
   int n = base < 0
-    ? (near_size - MIN_NEAR_SIZE) / filter_size
+    ? (near_size - MIN_NEAR_SIZE) / step_size
     : 2;
   if (n < 1) {
     return base;
@@ -500,9 +502,15 @@ int delay_estimator::estimate_(const short *far, int far_size,
     float ratio = try_echo_cancel(
         far,
         far_size,
-        near + i * filter_size,
-        std::min(MAX_NEAR_SIZE, near_size - i * filter_size),
+        near + i * step_size,
+        std::min(MAX_NEAR_SIZE, near_size - i * step_size),
         filter_size);
+    D("delay_estimator::try_echo_cancel(,,,,%d*%d) => %0.2f",
+        step_size / FRAME_SAMPS, i, ratio);
+    // 刚刚经过了一个足够好的极点
+    if (min_idx >= 0 && ratio > *cancel_ratio && *cancel_ratio < 0.6) {
+      break;
+    }
     if (ratio < 0.9 && (min_idx < 0 || ratio < *cancel_ratio)) {
       min_idx = i;
       *cancel_ratio = ratio;
@@ -518,16 +526,16 @@ int delay_estimator::estimate_(const short *far, int far_size,
 
   // 得到了回声延迟值，我们可以就此返回，也可以在它所指示的范围内采用更精细的
   // filter size 来寻找更精确的值。
-  if (filter_size / 2 < MIN_FILTER_SIZE) {
-    return min_idx * filter_size + base;
+  if (filter_size / 2 <= MIN_FILTER_SIZE) {
+    return min_idx * step_size + base;
   }
   return estimate_(
       far, 
       far_size,
-      near + min_idx * filter_size,
-      near_size - min_idx * filter_size,
+      near + min_idx * step_size,
+      near_size - min_idx * step_size,
       filter_size / 2,
-      base + min_idx * filter_size,
+      base + min_idx * step_size,
       cancel_ratio);
 }
 
@@ -546,8 +554,6 @@ float delay_estimator::try_echo_cancel(
   echo_cancel(near, far, samps, out, &ratio);
   delete[] out;
   speex_ec_close();
-  D("delay_estimator::try_echo_cancel(,,,,%d) => %0.2f",
-      filter_size / FRAME_SAMPS, ratio);
   return ratio;
 }
 
