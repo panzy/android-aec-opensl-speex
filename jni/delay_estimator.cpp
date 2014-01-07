@@ -486,6 +486,21 @@ int delay_estimator::estimate_(const short *far, int far_size,
       near_size / FRAME_SAMPS,
       filter_size / FRAME_SAMPS, base / FRAME_SAMPS);
 
+  // trim silent samples
+  const short *first_rich = far;
+  const short *end = far + far_size - FRAME_SAMPS;
+  while(first_rich < end && silent(first_rich, FRAME_SAMPS, 2000))
+    first_rich += FRAME_SAMPS;
+  if (first_rich > far && first_rich < end) {
+    int j = first_rich - far;
+    D("trim %d frames", j / FRAME_SAMPS);
+    far += j;
+    far_size -= j;
+    near += j;
+    near_size -= j;
+  }
+
+
   // 尝试 |n| 个回声延迟值，相邻两个值的差距是 |step_size|。
   // 
   // 这些值是相对于 |base| 的。
@@ -495,7 +510,7 @@ int delay_estimator::estimate_(const short *far, int far_size,
   int n = 0;
   int step_size = filter_size / 2;
   if (base < 0) {
-    n = std::min(MAX_DELAY_SIZE + FRAME_SAMPS, near_size - MIN_NEAR_SIZE) / step_size;
+    n = std::min(MAX_DELAY_SIZE, near_size - MIN_NEAR_SIZE) / step_size + 1;
   } else {
     n = 2;
   }
