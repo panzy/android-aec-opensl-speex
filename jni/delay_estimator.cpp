@@ -35,8 +35,8 @@ int64_t delay_estimator::timestamp(int64_t base)
  */
 bool delay_estimator::silent(const short *data, int samps, short threshold_amp)
 {
-  for (int i = 0, j = 0, k = samps >> 4; i < samps; ++i) {
-    if (abs(data[i]) > threshold_amp && ++j > k)
+  for (int i = 0, j = 0, k = samps >> 3; i < samps; ++i) {
+    if (abs(data[i]) > threshold_amp && ++j >= k)
       return false;
   }
   return true;
@@ -489,12 +489,12 @@ int delay_estimator::estimate_(const short *far, int far_size,
   {
     // find max amplitude in farend buf
     int max_amp = -1; // frame index
-    for (int i = 0; i < far_size - FRAME_SAMPS; i += FRAME_SAMPS) {
-      if (silent(far + i, FRAME_SAMPS, 2000))
+    for (int i = 0; i < far_size - FRAME_SAMPS; ++i) {
+      if (i % FRAME_SAMPS == 0 && silent(far + i, FRAME_SAMPS, 2000))
         continue;
       if (max_amp < 0 || abs(far[max_amp]) < abs(far[i])) {
         max_amp = i;
-        if (abs(far[i]) > 32768 / 4)
+        if (abs(far[i]) > (32768 >> 2))
           break;
       }
     }
@@ -542,7 +542,7 @@ int delay_estimator::estimate_(const short *far, int far_size,
         near + i * step_size,
         std::min(MAX_NEAR_SIZE, near_size - i * step_size),
         filter_size);
-    D("---- delay %d*%d => %0.2f", step_size / FRAME_SAMPS, i, ratio);
+    //D("---- delay %d*%d => %0.2f", step_size / FRAME_SAMPS, i, ratio);
     // 刚刚经过了一个足够好的极点
     if (min_idx >= 0 && ratio > *cancel_ratio && *cancel_ratio < 0.6) {
       break;
