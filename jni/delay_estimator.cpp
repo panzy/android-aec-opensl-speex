@@ -35,9 +35,8 @@ int64_t delay_estimator::timestamp(int64_t base)
  */
 bool delay_estimator::silent(const short *data, int samps, short threshold_amp)
 {
-  for (int i = 0; i < samps; ++i) {
-    // 由于自然语音的特点，仅凭一个不平凡的采样就可以认为这一帧“有声音”。
-    if (abs(data[i]) > threshold_amp)
+  for (int i = 0, j = 0, k = samps >> 4; i < samps; ++i) {
+    if (abs(data[i]) > threshold_amp && ++j > k)
       return false;
   }
   return true;
@@ -487,17 +486,33 @@ int delay_estimator::estimate_(const short *far, int far_size,
       filter_size / FRAME_SAMPS, base / FRAME_SAMPS);
 
   // trim silent samples
-  const short *first_rich = far;
-  const short *end = far + far_size - FRAME_SAMPS;
-  while(first_rich < end && silent(first_rich, FRAME_SAMPS, 2000))
-    first_rich += FRAME_SAMPS;
-  if (first_rich > far && first_rich < end) {
-    int j = first_rich - far;
-    D("trim %d frames", j / FRAME_SAMPS);
-    far += j;
-    far_size -= j;
-    near += j;
-    near_size -= j;
+  {
+    // find max amplitude in farend buf
+    int max_amp = -1; // frame index
+    for (int i = 0; i < far_size - FRAME_SAMPS; i += FRAME_SAMPS) {
+      if (silent(far + i, FRAME_SAMPS, 2000))
+        continue;
+      if (max_amp < 0 || abs(far[max_amp]) < abs(far[i])) {
+        max_amp = i;
+        if (abs(far[i]) > 32768 / 4)
+          break;
+      }
+    }
+
+    if (max_amp > 0) {
+      D("got max_amp: %d at %dms", abs(far[max_amp]), max_amp * 20 / FRAME_SAMPS);
+      const short *trim_start = far + max_amp;
+      while(trim_start >= far && !silent(trim_start, FRAME_SAMPS, 2000))
+        trim_start -= FRAME_SAMPS;
+      if (trim_start > far) {
+        int j = trim_start - far;
+        D("trim %d frames(%dms)", j / FRAME_SAMPS, 20 * j / FRAME_SAMPS);
+        far += j;
+        far_size -= j;
+        near += j;
+        near_size -= j;
+      }
+    }
   }
 
 
@@ -527,8 +542,7 @@ int delay_estimator::estimate_(const short *far, int far_size,
         near + i * step_size,
         std::min(MAX_NEAR_SIZE, near_size - i * step_size),
         filter_size);
-    D("delay_estimator::try_echo_cancel(,,,,%d*%d) => %0.2f",
-        step_size / FRAME_SAMPS, i, ratio);
+    D("---- delay %d*%d => %0.2f", step_size / FRAME_SAMPS, i, ratio);
     // 刚刚经过了一个足够好的极点
     if (min_idx >= 0 && ratio > *cancel_ratio && *cancel_ratio < 0.6) {
       break;
@@ -566,16 +580,18 @@ float delay_estimator::try_echo_cancel(
     const short *near, int near_size,
     int filter_size)
 {
-  if (!rich_nearend(near, near_size))
-    return 1;
-
-  speex_ec_open(SR, FRAME_SAMPS, filter_size);
-  int samps = far_size > near_size ? near_size : far_size;
   float ratio = 1;
-  short *out = new short[samps];
-  echo_cancel(near, far, samps, out, &ratio);
-  delete[] out;
-  speex_ec_close();
+  if (rich_nearend(near, near_size)) {
+    speex_ec_open(SR, FRAME_SAMPS, filter_size);
+    int samps = far_size > near_size ? near_size : far_size;
+    short *out = new short[samps];
+    echo_cancel(near, far, samps, out, &ratio);
+    delete[] out;
+    speex_ec_close();
+  }
+
+  D("delay_estimator::try_echo_cancel(far,%d,near,%d,%d) => %0.2f",
+      far_size / FRAME_SAMPS, near_size / FRAME_SAMPS, filter_size / FRAME_SAMPS, ratio);
   return ratio;
 }
 
