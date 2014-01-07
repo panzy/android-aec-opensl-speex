@@ -286,20 +286,7 @@ void start(JNIEnv *env, jint track_min_buf_size, jint record_min_buf_size,
   //    一旦 echo_delay2 被计算出来，就会用来修正 echo_delay。
   echo_delay2_desired = echo_delay_ms < 0;
   if (echo_delay_ms < 0) {
-    // 根据硬件参数估算回声延迟
-    //
-    // 经过测试，在满足以下条件的设备上——
-    // 1, track_min_buf_size = 870
-    // 2, record_min_buf_size = 4096
-    // 3, OpenSL buffer samples = 160
-    // 4, 主循环的 ahead 范围为 (20,60)ms ［TODO why would this matter ???]
-    // 5, [ in_buffer_cnt 和 out_buffer_cnt 对延迟没有影响 ]
-    // ——，回声延时大约为 20x20=400ms(+-40)，而延时是与 out_bufferframes 成正比的（参见
-    // AudioTrack::getMinFrameCount 的实现）
-    echo_delay = 18 * track_min_buf_size / 870;
-    // 延迟修正不足没关系，因为 speex AEC 模块有个 filter length 参数，初始化为
-    // 8xframe，但是修正过度就很严重，将完全不能消除回声。
-    echo_delay -= DELAY_TOL;
+    echo_delay = 10;
     echo_delay2 = ECHO_DELAY_NULL; // 要求动态评估
   } else {
     echo_delay = echo_delay_ms / FRAME_MS;
@@ -416,6 +403,7 @@ void runNearendProcessing()
   int rendered_samps = 0;
   int captured_samps = 0;
   int64_t t0 = timestamp(0), t1 = 0; // loop body begins
+  int64_t first_cap = 0; // first time of capture.
   while(on) {
     t1 = timestamp(0);
     ++loop_idx;
@@ -462,41 +450,6 @@ void runNearendProcessing()
       }
     }
 
-
-    //
-    // playback
-    //
-    int64_t play_proc_start = timestamp(0);
-    if (loop_idx < playback_delay) {
-      playback(silence, FRAME_SAMPS, false);
-      rendered_samps += FRAME_SAMPS;
-    } else {
-      int samps = read_circular_buffer(farend_buf, render_buf, FRAME_SAMPS);
-      if (samps > 0) {
-        playback(render_buf, samps, true);
-        rendered_samps += samps;
-      }
-      // pad underrun with silence
-      // |playback_delay| 可以显著减少这种情况的发生
-      int lack_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - rendered_samps;
-      lack_samps += 2 * FRAME_SAMPS; // 不但不应该紧缺，还应该有点富余
-      if (lack_samps > 0) {
-        //D("playback underrun, lack of %d samps", lack_samps);
-        if (samps > 0) {
-          align_farend_buf(lack_samps, render_buf, samps);
-        } else {
-          align_farend_buf(lack_samps, silence, FRAME_SAMPS);
-        }
-        rendered_samps += lack_samps;
-        if (lack_samps >= FRAME_SAMPS)
-          memset(render_buf, 0, FRAME_SAMPS * 2);
-      }
-    }
-    if (timestamp(play_proc_start) >= FRAME_MS * LOOP_FRAMES / 2) {
-      W("playback processing lasts too long: %"PRId64"ms",
-          timestamp(play_proc_start));
-    }
-
     //
     // record
     //
@@ -510,8 +463,10 @@ void runNearendProcessing()
       ++loop_cnt;
       int samps = android_AudioIn(p,inbuffer,FRAME_SAMPS);
       if (samps == FRAME_SAMPS) {
-        if (captured_samps == 0) 
-          D("first time of capture at @%ds", (int)(timestamp(t0) / 1000));
+        if (first_cap == 0) { 
+          first_cap = timestamp(0);
+          D("first time of capture at @%dms", (int)(first_cap - t0));
+        }
         captured_samps += samps;
         lack_cap_samps -= samps;
 
@@ -578,11 +533,49 @@ void runNearendProcessing()
           timestamp(rec_proc_start), loop_cnt);
     }
 
+    //
+    // playback
+    //
+    if (first_cap > 0) {
+      int64_t play_proc_start = timestamp(0);
+      if (loop_idx < playback_delay) {
+        playback(silence, FRAME_SAMPS, false);
+        rendered_samps += FRAME_SAMPS;
+      } else {
+        int samps = read_circular_buffer(farend_buf, render_buf, FRAME_SAMPS);
+        if (samps > 0) {
+          playback(render_buf, samps, true);
+          rendered_samps += samps;
+        }
+        // pad underrun with silence
+        // |playback_delay| 可以显著减少这种情况的发生
+        int lack_samps = timestamp(t0) * FRAME_SAMPS / FRAME_MS - rendered_samps;
+        lack_samps += 2 * FRAME_SAMPS; // 不但不应该紧缺，还应该有点富余
+        if (lack_samps > 0) {
+          //D("playback underrun, lack of %d samps", lack_samps);
+          if (samps > 0) {
+            align_farend_buf(lack_samps, render_buf, samps);
+          } else {
+            align_farend_buf(lack_samps, silence, FRAME_SAMPS);
+          }
+          rendered_samps += lack_samps;
+          if (lack_samps >= FRAME_SAMPS)
+            memset(render_buf, 0, FRAME_SAMPS * 2);
+        }
+      }
+      if (timestamp(play_proc_start) >= FRAME_MS * LOOP_FRAMES / 2) {
+        W("playback processing lasts too long: %"PRId64"ms",
+            timestamp(play_proc_start));
+      }
+    }
+
     // 平衡 |rendered_samps| 与物理时间。
     // (|captured_samps| 与物理时间的冲突通过在特定条件下重置|captured_samps|来
     // 解决。）
-    {
-      int64_t total_ahead = (rendered_samps / FRAME_SAMPS * FRAME_MS) - timestamp(t0);
+    if (first_cap == 0) {
+      usleep(FRAME_MS * 1000);
+    } else {
+      int64_t total_ahead = (rendered_samps / FRAME_SAMPS * FRAME_MS) - timestamp(first_cap);
       if (total_ahead > max_ahead) {
         total_ahead = total_ahead - min_ahead;
         //D("idle: sleep %"PRId64"ms", total_ahead);
@@ -591,8 +584,8 @@ void runNearendProcessing()
         // 这个很严重，播放有破音，回声消除可能从此失效一段时间。
         // 发生这个情况的原因是循环体的本次运行中某个操作耗时太长，导致播放队列
         // 见底了。
-        E("idle: total overrun for %dms! at @%ds", (int)(-total_ahead),
-            (int)(timestamp(t0) / 1000));
+        E("idle: total overrun for %dms! at @%dms", (int)(-total_ahead),
+            (int)(timestamp(t0)));
       }
     }
 
