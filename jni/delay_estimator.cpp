@@ -478,6 +478,9 @@ int delay_estimator::estimate_(const short *far, int far_size,
   // 传递给 try_echo_cancel() 的 |near| 的最大长度，
   const static int MAX_NEAR_SIZE = 100 * FRAME_SAMPS;
 
+  // 决定了搜索范围
+  const static int MAX_DELAY_SIZE = 50 * FRAME_SAMPS;
+
   D("delay_estimator::estimate(far,%d,near,%d,%d,%d)",
       far_size / FRAME_SAMPS,
       near_size / FRAME_SAMPS,
@@ -489,10 +492,14 @@ int delay_estimator::estimate_(const short *far, int far_size,
   //
   // 如果这不是递归的第一层，那么我们的尝试范围仅限于上一次所选择的回声延迟值的
   // 范围，恰好是上一次的 |step_size|，也就是本次 |step_size|x2。
+  int n = 0;
   int step_size = filter_size / 2;
-  int n = base < 0
-    ? (near_size - MIN_NEAR_SIZE) / step_size
-    : 2;
+  if (base < 0) {
+    n = std::min(MAX_DELAY_SIZE + FRAME_SAMPS, near_size - MIN_NEAR_SIZE) / step_size;
+  } else {
+    n = 2;
+  }
+
   if (n < 1) {
     return base;
   }
