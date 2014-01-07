@@ -48,8 +48,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * AEC 主线程遇到 FAREND_BUFFER underrun 会自动补充静音帧，AEC 模块无需区分输入
  * 给它的 farend 是原样的还是经过underrun修正的。
  * */
-void start(jint audio_track_min_buf_size, jint audio_record_min_buf_size,
-    jint playback_delay_ms, jint echo_delay_ms, jint _dump_raw = 0);
+void start(JNIEnv *env, jint audio_track_min_buf_size, jint
+    audio_record_min_buf_size, jint playback_delay_ms, jint echo_delay_ms,
+    jint _dump_raw = 0);
 /* 持续处理录音。*/
 void runNearendProcessing();
 /* 结束播放和录音。*/

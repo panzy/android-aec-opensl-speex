@@ -306,12 +306,21 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
     SLAndroidConfigurationItf recorderConfig;   
     result = (*p->recorderObject)->GetInterface(p->recorderObject, SL_IID_ANDROIDCONFIGURATION, &recorderConfig);
     if(result == SL_RESULT_SUCCESS) {
-      SLint32 streamType = SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION;
-      //SLint32 apiLvl = 9;// TODO query
-      //if(apiLvl >= 14){
-      //  streamType = SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION;
-      //}
+      SLint32 streamType = SL_ANDROID_RECORDING_PRESET_NONE;
+      if(p->os_api_level >= 14){
+        // SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION = 4
+        // 此配置会启用Android系统内置的回声消除功能（若设备支持的话）。
+        // 由于我们目前采用的NDK是android-9，头文件中没有这个常量。
+        streamType = 4;
+        I("config recorder, stream type=SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION"); 
+      } else {
+        streamType = SL_ANDROID_RECORDING_PRESET_GENERIC;
+        I("config recorder, stream type=SL_ANDROID_RECORDING_PRESET_GENERIC"); 
+      }
       result = (*recorderConfig)->SetConfiguration(recorderConfig, SL_ANDROID_KEY_RECORDING_PRESET, &streamType, sizeof(SLint32));
+      if (result != SL_RESULT_SUCCESS) {
+        E("failed to config recorder");
+      }
     }
      
     // realize the audio recorder
@@ -385,7 +394,8 @@ static void openSLDestroyEngine(OPENSL_STREAM *p){
 // open the android audio device for input and/or output
 OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
         int in_buffer_frames, int in_buffer_cnt,
-        int out_buffer_frames, int out_buffer_cnt){
+        int out_buffer_frames, int out_buffer_cnt,
+        int os_api_level){
   
   OPENSL_STREAM *p;
   p = (OPENSL_STREAM *) malloc(sizeof(OPENSL_STREAM));
@@ -393,6 +403,7 @@ OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
   p->inchannels = inchannels;
   p->outchannels = outchannels;
   p->sr = sr;
+  p->os_api_level = os_api_level;
   pthread_mutex_init(&p->bqPlayerCloseLock, NULL);
  
   if((p->outBufSamples  =  out_buffer_frames*outchannels) != 0) {
@@ -601,3 +612,4 @@ free_circular_buffer (circular_buffer *p){
   free(p->buffer);
   free(p);
 }
+

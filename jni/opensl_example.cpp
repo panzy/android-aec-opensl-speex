@@ -71,6 +71,7 @@ void speex_ec_close ();
 int playback(short *_farend, int samps, bool with_aec_analyze);
 float *to_float(short *frame);
 void set_playback_stream_type(jint stream_type);
+static jint get_api_level(JNIEnv *env);
 
 //--------------------------------------------------------------------------------
 
@@ -272,7 +273,7 @@ void close_dump_files()
   I("dump files closed");
 }
 
-void start(jint track_min_buf_size, jint record_min_buf_size,
+void start(JNIEnv *env, jint track_min_buf_size, jint record_min_buf_size,
     jint playback_delay_ms, jint echo_delay_ms, jint _dump_raw)
 {
   dump_raw = _dump_raw;
@@ -330,7 +331,8 @@ void start(jint track_min_buf_size, jint record_min_buf_size,
       FRAME_SAMPS,
       in_buffer_cnt,
       FRAME_SAMPS,
-      out_buffer_cnt);
+      out_buffer_cnt,
+      get_api_level(env));
   if(p == NULL) return; 
 
   farend_buf_size =  FRAME_SAMPS * std::max(FRAME_RATE * 5, 20 + playback_delay);
@@ -980,4 +982,33 @@ void offline_process()
    fclose(e_fd);
    fclose(echo_fd);
    fclose(ref_fd);
+}
+
+static jint get_api_level(JNIEnv *env)
+{
+    if ((env)->ExceptionCheck())
+        return false; // already got an exception pending
+
+    bool success = true;
+
+    // VERSION is a nested class within android.os.Build (hence "$" rather than "/")
+    jclass versionClass = (env)->FindClass("android/os/Build$VERSION");
+    if (NULL == versionClass)
+        success = false;
+
+    jfieldID sdkIntFieldID = NULL;
+    if (success)
+        success = (NULL != (sdkIntFieldID = (env)->GetStaticFieldID(versionClass, "SDK_INT", "I")));
+
+    jint sdkInt = 0;
+    if (success)
+    {
+        sdkInt = (env)->GetStaticIntField(versionClass, sdkIntFieldID);
+        __android_log_print(ANDROID_LOG_VERBOSE, TAG, "sdkInt = %d", sdkInt);
+    }
+
+    // cleanup
+    (env)->DeleteLocalRef(versionClass);
+
+    return sdkInt;
 }

@@ -89,6 +89,8 @@ typedef struct opensl_stream {
   int outchannels;
   int   sr;
 
+  int os_api_level;
+
 } OPENSL_STREAM;
 
   /*
@@ -97,7 +99,8 @@ typedef struct opensl_stream {
   */
   OPENSL_STREAM* android_OpenAudioDevice(int sr, int inchannels, int outchannels,
           int in_buffer_frames, int in_buffer_cnt,
-          int out_buffer_frames, int out_buffer_cnt);
+          int out_buffer_frames, int out_buffer_cnt,
+          int os_api_level);
   /* 
   Close the audio device 
   */

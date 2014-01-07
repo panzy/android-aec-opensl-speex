@@ -33,8 +33,8 @@ public class opensl_example {
     return opensl_exampleJNI.pull(buf);
   }
 
-  public static int estimate_delay(int async) {
-    return opensl_exampleJNI.estimate_delay(async);
+  public static int estimate_delay(int use_mem_data) {
+    return opensl_exampleJNI.estimate_delay(use_mem_data);
   }
 
   public static int get_estimated_echo_delay() {
