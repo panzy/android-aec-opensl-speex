@@ -71,6 +71,7 @@ void speex_ec_close ();
 int playback(short *_farend, int samps, bool with_aec_analyze);
 float *to_float(short *frame);
 void set_playback_stream_type(jint stream_type);
+void stat_ec(const short *inbuffer, const short *outbuffer, int samps);
 static jint get_api_level(JNIEnv *env);
 
 //--------------------------------------------------------------------------------
@@ -136,6 +137,10 @@ short *far_est_p = NULL;
 short *near_est_p = NULL;
 int far_est_size = 0;
 int near_est_size = 0;
+// 记录最近一次评估回声延迟时得到的最好消除效果（输出、输入信号强度之比），作为
+// stat_ec() 中判断当前回声消除是否有效的参考标准。之所以需要这么一个动态标准，
+// 是因为不同设备之间的最好效果差别很大。
+float recent_best_ec_ratio = -1;
 
 //----------------------------------------------------------------------
 
@@ -220,7 +225,7 @@ void fwrite_samps(short *frame, FILE *fd, int samps)
 // TODO rename to open_est_dump_files
 void open_log_files()
 {
-  I("open_log_files");
+  //I("open_log_files");
   const char *mode = "w+";
   int r = mkdir("/mnt/sdcard/tmp", 755);
   if (r == 0 || errno == EEXIST) {
@@ -249,7 +254,7 @@ void open_dump_files(const char *mode)
 // TODO rename to close_est_dump_files
 void close_log_files()
 {
-  I("close_log_files");
+  //I("close_log_files");
   if (fd_farend2)
     fclose(fd_farend2);
   if (fd_nearend2)
@@ -270,7 +275,7 @@ void close_dump_files()
       fclose(fd_send);
   }
   fd_farend = fd_nearend = fd_echo = fd_send = NULL;
-  I("dump files closed");
+  //I("dump files closed");
 }
 
 void start(JNIEnv *env, jint track_min_buf_size, jint record_min_buf_size,
@@ -341,13 +346,12 @@ void start(JNIEnv *env, jint track_min_buf_size, jint record_min_buf_size,
 
   open_dump_files("w+");
   on = 1;
-  t_start = timestamp(0);
   delay_est_thrd_stopped = true;
   far_est_p = near_est_p = NULL;
   far_est_size = near_est_size = 0;
 
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
-  D("start at %" PRId64 "ms" , t_start); 
+  D("start at %" PRId64 "ms" , timestamp(0)); 
 }
 
 void runNearendProcessing() 
@@ -404,6 +408,7 @@ void runNearendProcessing()
   int captured_samps = 0;
   int64_t t0 = timestamp(0), t1 = 0; // loop body begins
   int64_t first_cap = 0; // first time of capture.
+  t_start = t0;
   while(on) {
     t1 = timestamp(0);
     ++loop_idx;
@@ -507,6 +512,7 @@ void runNearendProcessing()
           speex_echo_cancellation(st, inbuffer, refbuf, processedbuffer);
           speex_preprocess_run(den, processedbuffer);
           out = processedbuffer;
+          stat_ec(inbuffer, out, samps);
         }
         // output
         if (samps != write_circular_buffer(nearend_buf, out, samps)) {
@@ -684,6 +690,7 @@ int estimate_delay(int use_mem_data)
   if (result >= 0) {
     result /= FRAME_SAMPS; // convert from samples to frames
     adjust_echo_delay2(result);
+    recent_best_ec_ratio = cancel_ratio;
   }
 
 END:
@@ -946,6 +953,32 @@ void speex_ec_close ()
   if (den) {
     speex_preprocess_state_destroy(den);
     den = NULL;
+  }
+}
+
+// 统计输出/输入信号强度。
+// 如果发现输出信号明显弱于输入信号，说明AEC在起作用，这时可以刷新
+// |last_est_time|，从而避免重新估算回声延迟。
+void stat_ec(const short *inbuffer, const short *outbuffer, int samps)
+{
+  const static int duration_sec = 4;
+  static int sum1 = 0, sum2 = 0;
+  static int stat_samps = 0;
+  for (int i = 0; i < samps; ++i) {
+    sum1 += abs(inbuffer[i]);
+    sum2 += abs(outbuffer[i]);
+  }
+  stat_samps += samps;
+  if (stat_samps > FRAME_SAMPS * FRAME_RATE * duration_sec) {
+    D("stat_ec, %0.2f", (float)sum2 / sum1);
+    if ((float)sum2 / sum1 < std::max(0.3f, recent_best_ec_ratio * 1.1f)) {
+      D("touch last_est_time at @%ds", (int)(timestamp(t_start) / 1000));
+      // touch timestamp
+      last_est_time = std::max(last_est_time,
+          timestamp(0) - duration_sec * 1000);
+    }
+    stat_samps = 0;
+    sum1 = sum2 = 0;
   }
 }
 
