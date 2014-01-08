@@ -407,6 +407,10 @@ void runNearendProcessing()
   int rendered_samps = 0;
   int captured_samps = 0;
   int64_t t0 = timestamp(0), t1 = 0; // loop body begins
+  // 首次从mic读取到数据后才开始播放。
+  // 不这么做的话对缓冲区进行回声延迟修正时可能出现偏差。在集成测试中，表现
+  // 为己方发起的语音通话不能正确消除回声，但对方发起的则可以。
+  // 这个时间间隔貌似主要由 |record_min_buf_size| 决定。
   int64_t first_cap = 0; // first time of capture.
   t_start = t0;
   while(on) {
