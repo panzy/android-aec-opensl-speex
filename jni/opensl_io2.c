@@ -31,6 +31,7 @@
 
 #define TAG "aec_opensl"
 
+static SLuint32 openSLChooseInputDevice(OPENSL_STREAM *p);
 static void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context);
 static void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context);
 circular_buffer* create_circular_buffer(int count);
@@ -293,10 +294,12 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
     default:
       return -1;
     }
+
+    SLuint32 mic_deviceId = openSLChooseInputDevice(p);
     
     // configure audio source
     SLDataLocator_IODevice loc_dev = {SL_DATALOCATOR_IODEVICE, SL_IODEVICE_AUDIOINPUT,
-				      SL_DEFAULTDEVICEID_AUDIOINPUT, NULL};
+				      mic_deviceId, NULL};
     SLDataSource audioSrc = {&loc_dev, NULL};
 
     // configure audio sink
@@ -324,15 +327,15 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
     result = (*p->engineObject)->GetInterface(p->engineObject, SL_IID_DEVICEVOLUME, &deviceVolumeItf);
     if (result == SL_RESULT_SUCCESS) {
       SLint32 vol;
-      (*deviceVolumeItf)->GetVolume(deviceVolumeItf, SL_DEFAULTDEVICEID_AUDIOINPUT, &vol);
+      (*deviceVolumeItf)->GetVolume(deviceVolumeItf, mic_deviceId, &vol);
       I("audio recorder, curr vol %d", (int)vol);
       // WebRTC 使用如下公式计算 mic volume:
       // vol = ((volume * (_maxSpeakerVolume - _minSpeakerVolume)
       //        + (int) (255 / 2)) / (255)) + _minSpeakerVolume;
       //
       // http://webrtc.googlecode.com/svn-history/r214/trunk/src/modules/audio_device/main/source/Android/audio_device_android_opensles.cc
-      (*deviceVolumeItf)->SetVolume(deviceVolumeItf, SL_DEFAULTDEVICEID_AUDIOINPUT, -300);
-      (*deviceVolumeItf)->GetVolume(deviceVolumeItf, SL_DEFAULTDEVICEID_AUDIOINPUT, &vol);
+      (*deviceVolumeItf)->SetVolume(deviceVolumeItf, mic_deviceId, -300);
+      (*deviceVolumeItf)->GetVolume(deviceVolumeItf, mic_deviceId, &vol);
       I("audio recorder, curr vol %d", (int)vol);
     } else if (result == SL_RESULT_FEATURE_UNSUPPORTED) {
       W("failed to set mic volume, result %d, SL_RESULT_FEATURE_UNSUPPORTED", (int)result);
@@ -394,6 +397,55 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
   else return SL_RESULT_SUCCESS;
 
 
+}
+
+static SLuint32 openSLChooseInputDevice(OPENSL_STREAM *p) {
+
+  SLuint32 mic_deviceId = SL_DEFAULTDEVICEID_AUDIOINPUT;
+  SLresult result;
+  SLAudioIODeviceCapabilitiesItf AudioIODeviceCapabilitiesItf;
+  int i;
+  result = (*p->engineObject)->GetInterface(p->engineObject, SL_IID_AUDIOIODEVICECAPABILITIES,
+      &AudioIODeviceCapabilitiesItf);
+  if (result == SL_RESULT_SUCCESS) {
+    const int MAX_NUMBER_INPUT_DEVICES = 5;
+    SLint32 numInputs = MAX_NUMBER_INPUT_DEVICES;
+    SLuint32 InputDeviceIDs[MAX_NUMBER_INPUT_DEVICES];
+    result = (*AudioIODeviceCapabilitiesItf)->GetAvailableAudioInputs(AudioIODeviceCapabilitiesItf,
+        &numInputs, InputDeviceIDs);
+    D("query mic devices: result %d, count %d", (int)result, (int)numInputs);
+    if (result == SL_RESULT_SUCCESS && numInputs > 0) {
+      SLAudioInputDescriptor AudioInputDescriptor;
+      for (i = 0; i < numInputs; ++i) {
+        result = (*AudioIODeviceCapabilitiesItf)->QueryAudioInputCapabilities(
+            AudioIODeviceCapabilitiesItf, InputDeviceIDs[i], &AudioInputDescriptor); 
+        D("see mic device id: %d", (int)InputDeviceIDs[i]);
+        if((AudioInputDescriptor.deviceConnection ==
+              SL_DEVCONNECTION_ATTACHED_WIRED)&&
+            (AudioInputDescriptor.deviceScope == SL_DEVSCOPE_USER)&&
+            (AudioInputDescriptor.deviceLocation ==
+             SL_DEVLOCATION_HEADSET))
+        {
+          mic_deviceId = InputDeviceIDs[i];
+          break;
+        }
+        else if((AudioInputDescriptor.deviceConnection ==
+              SL_DEVCONNECTION_INTEGRATED)&&
+            (AudioInputDescriptor.deviceScope ==
+             SL_DEVSCOPE_USER)&&
+            (AudioInputDescriptor.deviceLocation ==
+             SL_DEVLOCATION_HANDSET))
+        {
+          mic_deviceId = InputDeviceIDs[i];
+          break;
+        }
+      }
+    }
+  } else {
+    W("failed to get interface SL_IID_AUDIOIODEVICECAPABILITIES, result %d", (uint)result);
+  }
+  D("choose mic device id: 0x%08x", (uint)mic_deviceId);
+  return mic_deviceId;
 }
 
 // close the OpenSL IO and destroy the audio engine
