@@ -506,10 +506,10 @@ void runNearendProcessing()
           //speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * SPEEX_FILTER_SIZE);
           echo_delay = echo_delay2;
         }
-        read_circular_buffer(echo_buf, refbuf, samps);
+        int ref_samps = read_circular_buffer(echo_buf, refbuf, samps);
 
         short *out = inbuffer; // output(send) frame
-        if (loop_idx < playback_delay + echo_delay || echo_delay <= 0) {
+        if (loop_idx < playback_delay + echo_delay || echo_delay <= 0 || ref_samps < samps) {
           // output as-is
         } else {
           // do AEC
@@ -524,7 +524,8 @@ void runNearendProcessing()
         }
         if (dump_raw) {
           fwrite_samps(inbuffer, fd_nearend, samps);
-          fwrite_samps(refbuf, fd_echo, samps);
+          if (ref_samps > 0)
+            fwrite_samps(refbuf, fd_echo, ref_samps);
           fwrite_samps(out, fd_send, samps);
         }
       } else {
