@@ -138,10 +138,10 @@ SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType)
     SLDataSink audioSnk = {&loc_outmix, NULL};
 
     // create audio player
-    const SLInterfaceID ids1[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE, SL_IID_ANDROIDCONFIGURATION};
-    const SLboolean req1[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
+    const SLInterfaceID ids1[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE, SL_IID_ANDROIDCONFIGURATION, SL_IID_VOLUME};
+    const SLboolean req1[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
     result = (*p->engineEngine)->CreateAudioPlayer(p->engineEngine, &(p->bqPlayerObject), &audioSrc, &audioSnk,
-						   2, ids1, req1);
+        sizeof(ids1) / sizeof(SLInterfaceID), ids1, req1);
     if(result != SL_RESULT_SUCCESS) goto end_openaudio;
 
     // set stream type
@@ -172,6 +172,21 @@ SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType)
     // register callback on the buffer queue
     result = (*p->bqPlayerBufferQueue)->RegisterCallback(p->bqPlayerBufferQueue, bqPlayerCallback, p);
     if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+    SLVolumeItf volumeIf;
+    result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_VOLUME, &volumeIf);
+    if (result == SL_RESULT_SUCCESS) {
+      SLmillibel maxVolume, volume;
+      (*volumeIf)->GetMaxVolumeLevel(volumeIf, &maxVolume);
+      //(*volumeIf)->GetVolumeLevel(volumeIf, &volume);
+      //I("audio player volume, max %dmB, curr %dmB", maxVolume, volume);
+      // 在某些设备上，音量太大时录音会失真（波峰被截断了，可能是受音频格式PCM16
+      // 限制？），导致speex AEC失败。
+      volume = -300; // mB, 1dB=100mB
+      (*volumeIf)->SetVolumeLevel(volumeIf, volume);
+      (*volumeIf)->GetVolumeLevel(volumeIf, &volume);
+      I("audio player volume, max %dmB, curr %dmB", maxVolume, volume);
+    }
 
     // set the player's state to playing
     result = (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_PLAYING);
@@ -300,29 +315,29 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
     const SLInterfaceID id[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE, SL_IID_ANDROIDCONFIGURATION};
     const SLboolean req[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
     result = (*p->engineEngine)->CreateAudioRecorder(p->engineEngine, &(p->recorderObject), &audioSrc,
-						     &audioSnk, 2, id, req);
+						     &audioSnk, sizeof(id) / sizeof(SLInterfaceID), id, req);
     if (SL_RESULT_SUCCESS != result) goto end_recopen;
 
     SLAndroidConfigurationItf recorderConfig;   
     result = (*p->recorderObject)->GetInterface(p->recorderObject, SL_IID_ANDROIDCONFIGURATION, &recorderConfig);
     if(result == SL_RESULT_SUCCESS) {
-      SLint32 streamType = SL_ANDROID_RECORDING_PRESET_NONE;
-      if(p->os_api_level >= 14){
+      SLint32 streamType = SL_ANDROID_RECORDING_PRESET_GENERIC;
+      if(p->os_api_level >= 11){
         // SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION = 4
         // 此配置会启用Android系统内置的回声消除功能（若设备支持的话）。
         // 由于我们目前采用的NDK是android-9，头文件中没有这个常量。
         streamType = 4;
-        I("config recorder, stream type=SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION"); 
+        I("config recorder, android-%d, stream type=SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION", p->os_api_level); 
       } else {
-        streamType = SL_ANDROID_RECORDING_PRESET_GENERIC;
-        I("config recorder, stream type=SL_ANDROID_RECORDING_PRESET_GENERIC"); 
+        streamType = SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION;
+        I("config recorder, android-%d, stream type=SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION", p->os_api_level); 
       }
       result = (*recorderConfig)->SetConfiguration(recorderConfig, SL_ANDROID_KEY_RECORDING_PRESET, &streamType, sizeof(SLint32));
       if (result != SL_RESULT_SUCCESS) {
         E("failed to config recorder");
       }
     }
-     
+
     // realize the audio recorder
     result = (*p->recorderObject)->Realize(p->recorderObject, SL_BOOLEAN_FALSE);
     if (SL_RESULT_SUCCESS != result) goto end_recopen;
