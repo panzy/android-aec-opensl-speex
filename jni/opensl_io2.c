@@ -318,6 +318,30 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
 						     &audioSnk, sizeof(id) / sizeof(SLInterfaceID), id, req);
     if (SL_RESULT_SUCCESS != result) goto end_recopen;
 
+    // set mic volume.
+    // 这部分代码应该是没问题的，不过还没遇到哪个手机实现了这个功能。
+    SLDeviceVolumeItf deviceVolumeItf;
+    result = (*p->engineObject)->GetInterface(p->engineObject, SL_IID_DEVICEVOLUME, &deviceVolumeItf);
+    if (result == SL_RESULT_SUCCESS) {
+      SLint32 vol;
+      (*deviceVolumeItf)->GetVolume(deviceVolumeItf, SL_DEFAULTDEVICEID_AUDIOINPUT, &vol);
+      I("audio recorder, curr vol %d", (int)vol);
+      // WebRTC 使用如下公式计算 mic volume:
+      // vol = ((volume * (_maxSpeakerVolume - _minSpeakerVolume)
+      //        + (int) (255 / 2)) / (255)) + _minSpeakerVolume;
+      //
+      // http://webrtc.googlecode.com/svn-history/r214/trunk/src/modules/audio_device/main/source/Android/audio_device_android_opensles.cc
+      (*deviceVolumeItf)->SetVolume(deviceVolumeItf, SL_DEFAULTDEVICEID_AUDIOINPUT, -300);
+      (*deviceVolumeItf)->GetVolume(deviceVolumeItf, SL_DEFAULTDEVICEID_AUDIOINPUT, &vol);
+      I("audio recorder, curr vol %d", (int)vol);
+    } else if (result == SL_RESULT_FEATURE_UNSUPPORTED) {
+      W("failed to set mic volume, result %d, SL_RESULT_FEATURE_UNSUPPORTED", (int)result);
+    }
+    else {
+      W("failed to set mic volume, result %d", (int)result);
+    }
+
+    // set recording preset
     SLAndroidConfigurationItf recorderConfig;   
     result = (*p->recorderObject)->GetInterface(p->recorderObject, SL_IID_ANDROIDCONFIGURATION, &recorderConfig);
     if(result == SL_RESULT_SUCCESS) {
