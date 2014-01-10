@@ -66,6 +66,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
     private static final int FRAME_SAMPS = 320; // samples per frame
     private static final int FRAME_MS = 1000 * FRAME_SAMPS / SR; // ms
     private static final int playback_delay = 300; // ms
+    private static final int dump_raw = 0;
 
 	Thread thread;
     Thread thread2;
@@ -213,7 +214,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
         };
 
         int echo_delay_ms = getSharedPreferences("aec", 0).getInt("echo_delay_ms", -1);
-        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms, 1);
+        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms, dump_raw);
         thread.start();
         thread2.start();
         thread3.start();

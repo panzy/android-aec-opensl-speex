@@ -54,9 +54,9 @@ const int EST_BUF_CAPACITY = MAX_DELAY * 5 * FRAME_SAMPS; // in samps
 // 如果新评估的回声延迟值不大于当前正在使用的延迟值加上此容差，则不作调整。
 // 因为每次调整后的一段短暂时间里回声消除都会失效，所以想减少调整。
 // 理论上此值小于 |SPEEX_FILTER_SIZE| 就行了。
-const int DELAY_TOL = 4;
+const int DELAY_TOL = 1;
 // speex AEC filter size in frame
-const int SPEEX_FILTER_SIZE = 10;
+const int SPEEX_FILTER_SIZE = 8;
 
 #define TAG "aec" // log tag
 
@@ -124,6 +124,12 @@ int echo_delay = ECHO_DELAY_NULL; // samps, relative to playback
 int echo_delay2 = ECHO_DELAY_NULL; // samps, relative to playback, estimated by WebRtc 
 bool echo_delay2_desired = false;
 int64_t last_est_time = 0; // last time we got |echo_delay2|
+// 记录最近一次评估回声延迟时得到的最好消除效果（输出、输入信号强度之比），作为
+// stat_ec() 中判断当前回声消除是否有效的参考标准。之所以需要这么一个动态标准，
+// 是因为不同设备之间的最好效果差别很大。
+float recent_best_ec_ratio = -1;
+// 准实时统计的回声消除效果
+float curr_ec_ratio = -1;
 int in_buffer_cnt = 0;
 int out_buffer_cnt = 0;
 
@@ -137,10 +143,6 @@ short *far_est_p = NULL;
 short *near_est_p = NULL;
 int far_est_size = 0;
 int near_est_size = 0;
-// 记录最近一次评估回声延迟时得到的最好消除效果（输出、输入信号强度之比），作为
-// stat_ec() 中判断当前回声消除是否有效的参考标准。之所以需要这么一个动态标准，
-// 是因为不同设备之间的最好效果差别很大。
-float recent_best_ec_ratio = -1;
 
 //----------------------------------------------------------------------
 
@@ -349,6 +351,8 @@ void start(JNIEnv *env, jint track_min_buf_size, jint record_min_buf_size,
   delay_est_thrd_stopped = true;
   far_est_p = near_est_p = NULL;
   far_est_size = near_est_size = 0;
+  recent_best_ec_ratio = -1;
+  curr_ec_ratio = -1;
 
   memset(silence, 0, FRAME_SAMPS * sizeof(short));
   D("start at %" PRId64 "ms" , timestamp(0)); 
@@ -502,8 +506,8 @@ void runNearendProcessing()
             }
           }
           // reopen speex
-          //speex_ec_close();
-          //speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * SPEEX_FILTER_SIZE);
+          speex_ec_close();
+          speex_ec_open(SR, FRAME_SAMPS, FRAME_SAMPS * SPEEX_FILTER_SIZE);
           echo_delay = echo_delay2;
         }
         int ref_samps = read_circular_buffer(echo_buf, refbuf, samps);
@@ -694,8 +698,10 @@ int estimate_delay(int use_mem_data)
       &cancel_ratio );
   if (result >= 0) {
     result /= FRAME_SAMPS; // convert from samples to frames
-    adjust_echo_delay2(result);
-    recent_best_ec_ratio = cancel_ratio;
+    if (curr_ec_ratio < 0 || cancel_ratio < curr_ec_ratio) {
+      adjust_echo_delay2(result);
+      recent_best_ec_ratio = cancel_ratio;
+    }
   }
 
 END:
@@ -975,13 +981,16 @@ void stat_ec(const short *inbuffer, const short *outbuffer, int samps)
   }
   stat_samps += samps;
   if (stat_samps > FRAME_SAMPS * FRAME_RATE * duration_sec) {
-    D("stat_ec, %0.2f", (float)sum2 / sum1);
-    if ((float)sum2 / sum1 < std::max(0.3f, recent_best_ec_ratio * 1.1f)) {
-      D("touch last_est_time at @%ds", (int)(timestamp(t_start) / 1000));
+    bool touched = false;
+    curr_ec_ratio = (float)sum2 / sum1;
+    if (curr_ec_ratio < std::max(0.3f, recent_best_ec_ratio * 1.1f)) {
       // touch timestamp
       last_est_time = std::max(last_est_time,
           timestamp(0) - duration_sec * 1000);
+      touched = true;
     }
+    D("stat_ec, %0.2f @%ds %s", curr_ec_ratio, (int)(timestamp(t_start) / 1000),
+        (touched ? "(valid)" : ""));
     stat_samps = 0;
     sum1 = sum2 = 0;
   }
