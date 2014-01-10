@@ -64,7 +64,7 @@ typedef struct opensl_stream {
   SLAndroidSimpleBufferQueueItf bqPlayerBufferQueue;
   SLEffectSendItf bqPlayerEffectSend;
   SLint32 bqPlayerStreamType;
-  pthread_mutex_t bqPlayerCloseLock;
+  pthread_mutex_t playerLock;
 
   // recorder interfaces
   SLObjectItf recorderObject;

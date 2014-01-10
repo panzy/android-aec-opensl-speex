@@ -70,137 +70,140 @@ SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType)
   SLuint32 sr = p->sr;
   SLuint32  channels = p->outchannels;
 
-  if(channels){
-    // configure audio source
-    SLDataLocator_AndroidSimpleBufferQueue loc_bufq = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
+  if (0 == pthread_mutex_trylock(&p->playerLock)) {
+    if(channels){
+      // configure audio source
+      SLDataLocator_AndroidSimpleBufferQueue loc_bufq = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
 
-    switch(sr){
+      switch(sr){
 
-    case 8000:
-      sr = SL_SAMPLINGRATE_8;
-      break;
-    case 11025:
-      sr = SL_SAMPLINGRATE_11_025;
-      break;
-    case 16000:
-      sr = SL_SAMPLINGRATE_16;
-      break;
-    case 22050:
-      sr = SL_SAMPLINGRATE_22_05;
-      break;
-    case 24000:
-      sr = SL_SAMPLINGRATE_24;
-      break;
-    case 32000:
-      sr = SL_SAMPLINGRATE_32;
-      break;
-    case 44100:
-      sr = SL_SAMPLINGRATE_44_1;
-      break;
-    case 48000:
-      sr = SL_SAMPLINGRATE_48;
-      break;
-    case 64000:
-      sr = SL_SAMPLINGRATE_64;
-      break;
-    case 88200:
-      sr = SL_SAMPLINGRATE_88_2;
-      break;
-    case 96000:
-      sr = SL_SAMPLINGRATE_96;
-      break;
-    case 192000:
-      sr = SL_SAMPLINGRATE_192;
-      break;
-    default:
-      return -1;
-    }
-   
-    const SLInterfaceID ids[] = {SL_IID_VOLUME};
-    const SLboolean req[] = {SL_BOOLEAN_FALSE};
-    result = (*p->engineEngine)->CreateOutputMix(p->engineEngine, &(p->outputMixObject), 1, ids, req);
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+        case 8000:
+          sr = SL_SAMPLINGRATE_8;
+          break;
+        case 11025:
+          sr = SL_SAMPLINGRATE_11_025;
+          break;
+        case 16000:
+          sr = SL_SAMPLINGRATE_16;
+          break;
+        case 22050:
+          sr = SL_SAMPLINGRATE_22_05;
+          break;
+        case 24000:
+          sr = SL_SAMPLINGRATE_24;
+          break;
+        case 32000:
+          sr = SL_SAMPLINGRATE_32;
+          break;
+        case 44100:
+          sr = SL_SAMPLINGRATE_44_1;
+          break;
+        case 48000:
+          sr = SL_SAMPLINGRATE_48;
+          break;
+        case 64000:
+          sr = SL_SAMPLINGRATE_64;
+          break;
+        case 88200:
+          sr = SL_SAMPLINGRATE_88_2;
+          break;
+        case 96000:
+          sr = SL_SAMPLINGRATE_96;
+          break;
+        case 192000:
+          sr = SL_SAMPLINGRATE_192;
+          break;
+        default:
+          return -1;
+      }
 
-    // realize the output mix
-    result = (*p->outputMixObject)->Realize(p->outputMixObject, SL_BOOLEAN_FALSE);
-   
-    int speakers;
-    if(channels > 1) 
-      speakers = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
-    else speakers = SL_SPEAKER_FRONT_CENTER;
-    SLDataFormat_PCM format_pcm = {SL_DATAFORMAT_PCM,channels, sr,
-				   SL_PCMSAMPLEFORMAT_FIXED_16, SL_PCMSAMPLEFORMAT_FIXED_16,
-				   speakers, SL_BYTEORDER_LITTLEENDIAN};
+      const SLInterfaceID ids[] = {SL_IID_VOLUME};
+      const SLboolean req[] = {SL_BOOLEAN_FALSE};
+      result = (*p->engineEngine)->CreateOutputMix(p->engineEngine, &(p->outputMixObject), 1, ids, req);
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
 
-    SLDataSource audioSrc = {&loc_bufq, &format_pcm};
+      // realize the output mix
+      result = (*p->outputMixObject)->Realize(p->outputMixObject, SL_BOOLEAN_FALSE);
 
-    // configure audio sink
-    SLDataLocator_OutputMix loc_outmix = {SL_DATALOCATOR_OUTPUTMIX, p->outputMixObject};
-    SLDataSink audioSnk = {&loc_outmix, NULL};
+      int speakers;
+      if(channels > 1) 
+        speakers = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
+      else speakers = SL_SPEAKER_FRONT_CENTER;
+      SLDataFormat_PCM format_pcm = {SL_DATAFORMAT_PCM,channels, sr,
+        SL_PCMSAMPLEFORMAT_FIXED_16, SL_PCMSAMPLEFORMAT_FIXED_16,
+        speakers, SL_BYTEORDER_LITTLEENDIAN};
 
-    // create audio player
-    const SLInterfaceID ids1[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE, SL_IID_ANDROIDCONFIGURATION, SL_IID_VOLUME};
-    const SLboolean req1[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
-    result = (*p->engineEngine)->CreateAudioPlayer(p->engineEngine, &(p->bqPlayerObject), &audioSrc, &audioSnk,
-        sizeof(ids1) / sizeof(SLInterfaceID), ids1, req1);
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+      SLDataSource audioSrc = {&loc_bufq, &format_pcm};
 
-    // set stream type
-    p->bqPlayerStreamType = streamType;
-    SLAndroidConfigurationItf playerConfig;
-    result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject,
-        SL_IID_ANDROIDCONFIGURATION, &playerConfig);
-    assert(SL_RESULT_SUCCESS == result);
-    if (SL_RESULT_SUCCESS == result) {
-      result = (*playerConfig)->SetConfiguration(playerConfig,
-          SL_ANDROID_KEY_STREAM_TYPE, &streamType, sizeof(SLint32));
+      // configure audio sink
+      SLDataLocator_OutputMix loc_outmix = {SL_DATALOCATOR_OUTPUTMIX, p->outputMixObject};
+      SLDataSink audioSnk = {&loc_outmix, NULL};
+
+      // create audio player
+      const SLInterfaceID ids1[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE, SL_IID_ANDROIDCONFIGURATION, SL_IID_VOLUME};
+      const SLboolean req1[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
+      result = (*p->engineEngine)->CreateAudioPlayer(p->engineEngine, &(p->bqPlayerObject), &audioSrc, &audioSnk,
+          sizeof(ids1) / sizeof(SLInterfaceID), ids1, req1);
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+      // set stream type
+      p->bqPlayerStreamType = streamType;
+      SLAndroidConfigurationItf playerConfig;
+      result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject,
+          SL_IID_ANDROIDCONFIGURATION, &playerConfig);
       assert(SL_RESULT_SUCCESS == result);
+      if (SL_RESULT_SUCCESS == result) {
+        result = (*playerConfig)->SetConfiguration(playerConfig,
+            SL_ANDROID_KEY_STREAM_TYPE, &streamType, sizeof(SLint32));
+        assert(SL_RESULT_SUCCESS == result);
+      }
+
+      // realize the player
+      result = (*p->bqPlayerObject)->Realize(p->bqPlayerObject, SL_BOOLEAN_FALSE);
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+      // get the play interface
+      result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_PLAY, &(p->bqPlayerPlay));
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+      // get the buffer queue interface
+      result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_ANDROIDSIMPLEBUFFERQUEUE,
+          &(p->bqPlayerBufferQueue));
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+      // register callback on the buffer queue
+      result = (*p->bqPlayerBufferQueue)->RegisterCallback(p->bqPlayerBufferQueue, bqPlayerCallback, p);
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+      SLVolumeItf volumeIf;
+      result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_VOLUME, &volumeIf);
+      if (result == SL_RESULT_SUCCESS) {
+        SLmillibel maxVolume, volume;
+        (*volumeIf)->GetMaxVolumeLevel(volumeIf, &maxVolume);
+        //(*volumeIf)->GetVolumeLevel(volumeIf, &volume);
+        //I("audio player volume, max %dmB, curr %dmB", maxVolume, volume);
+        // 在某些设备上，音量太大时录音会失真（波峰被截断了，可能是受音频格式PCM16
+        // 限制？），导致speex AEC失败。
+        volume = -300; // mB, 1dB=100mB
+        (*volumeIf)->SetVolumeLevel(volumeIf, volume);
+        (*volumeIf)->GetVolumeLevel(volumeIf, &volume);
+        I("audio player volume, max %dmB, curr %dmB", maxVolume, volume);
+      }
+
+      // set the player's state to playing
+      result = (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_PLAYING);
+
+      if((p->playBuffer = (short *) calloc(p->outBufSamples, sizeof(short))) == NULL) {
+        return -1;
+      }
+
+      (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue, 
+          p->playBuffer,p->outBufSamples*sizeof(short));
+
+end_openaudio:
+      return result;
     }
-
-    // realize the player
-    result = (*p->bqPlayerObject)->Realize(p->bqPlayerObject, SL_BOOLEAN_FALSE);
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
-    // get the play interface
-    result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_PLAY, &(p->bqPlayerPlay));
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
-    // get the buffer queue interface
-    result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_ANDROIDSIMPLEBUFFERQUEUE,
-						&(p->bqPlayerBufferQueue));
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
-    // register callback on the buffer queue
-    result = (*p->bqPlayerBufferQueue)->RegisterCallback(p->bqPlayerBufferQueue, bqPlayerCallback, p);
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
-    SLVolumeItf volumeIf;
-    result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_VOLUME, &volumeIf);
-    if (result == SL_RESULT_SUCCESS) {
-      SLmillibel maxVolume, volume;
-      (*volumeIf)->GetMaxVolumeLevel(volumeIf, &maxVolume);
-      //(*volumeIf)->GetVolumeLevel(volumeIf, &volume);
-      //I("audio player volume, max %dmB, curr %dmB", maxVolume, volume);
-      // 在某些设备上，音量太大时录音会失真（波峰被截断了，可能是受音频格式PCM16
-      // 限制？），导致speex AEC失败。
-      volume = -300; // mB, 1dB=100mB
-      (*volumeIf)->SetVolumeLevel(volumeIf, volume);
-      (*volumeIf)->GetVolumeLevel(volumeIf, &volume);
-      I("audio player volume, max %dmB, curr %dmB", maxVolume, volume);
-    }
-
-    // set the player's state to playing
-    result = (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_PLAYING);
-
-    if((p->playBuffer = (short *) calloc(p->outBufSamples, sizeof(short))) == NULL) {
-      return -1;
-    }
-
-    (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue, 
-				       p->playBuffer,p->outBufSamples*sizeof(short));
- 
-  end_openaudio:
-    return result;
+    pthread_mutex_unlock(&p->playerLock);
   }
   return SL_RESULT_SUCCESS;
 }
@@ -208,7 +211,7 @@ SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType)
 void openSLPlayClose(OPENSL_STREAM *p){
 
   // destroy buffer queue audio player object, and invalidate all associated interfaces
-  if (0 == pthread_mutex_trylock(&p->bqPlayerCloseLock)) {
+  if (0 == pthread_mutex_trylock(&p->playerLock)) {
     if (p->bqPlayerObject != NULL && p->bqPlayerPlay != NULL) {
       SLuint32 state = SL_PLAYSTATE_PLAYING;
       (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_STOPPED);
@@ -220,7 +223,7 @@ void openSLPlayClose(OPENSL_STREAM *p){
       p->bqPlayerBufferQueue = NULL;
       p->bqPlayerEffectSend = NULL;
     }
-    pthread_mutex_unlock(&p->bqPlayerCloseLock);
+    pthread_mutex_unlock(&p->playerLock);
   }
 }
 
@@ -495,7 +498,7 @@ OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
   p->outchannels = outchannels;
   p->sr = sr;
   p->os_api_level = os_api_level;
-  pthread_mutex_init(&p->bqPlayerCloseLock, NULL);
+  pthread_mutex_init(&p->playerLock, NULL);
  
   if((p->outBufSamples  =  out_buffer_frames*outchannels) != 0) {
     if((p->outputBuffer = (short *) calloc(p->outBufSamples, sizeof(short))) == NULL) {
@@ -570,7 +573,7 @@ void android_CloseAudioDevice(OPENSL_STREAM *p){
   free_circular_buffer(p->inrb);
   free_circular_buffer(p->outrb);
 
-  pthread_mutex_destroy(&p->bqPlayerCloseLock);
+  pthread_mutex_destroy(&p->playerLock);
   free(p);
 }
 
