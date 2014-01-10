@@ -13,51 +13,15 @@
 class delay_estimator {
   int SR;
   int FRAME_SAMPS;
-  int MAX_DELAY;
-  int MAX_FAR_SAMPS; // search scope in farend
-  int MAX_NEAR_SAMPS; // size of search target
-  short *farbuf;
-  short *nearbuf;
-  int total_far_samps;
-  int total_near_samps;
-  char *delay_hits; // [delay] => hit_times
-  float *delay_quality; // [delay] => quality
-  int best_delay;
-  int second_best_delay;
-  int last_delay;
-  int largest_delay;
   int comp_times;
-  bool processing; // is processing in progress?
-  pthread_mutex_t process_lock;
-  pthread_mutex_t buf_lock;
-  pthread_t process_thrd;
   SpeexEchoState *st;
-
-  public:
-  int async_hint; // hint param of process_async method.
-  int succ_times; // success times of processing
 
   //------------------------------------------------------------
   public:
 
-  // max_delay - size of farend buffer in frames
-  // nearend_frames - size of nearend buffer in frames
-  delay_estimator(int sr, int frame_samps, int max_delay, int nearend_frames);
+  delay_estimator(int sr, int frame_samps);
   ~delay_estimator();
-  int add_far(short *data, int samps);
-  int add_near(short *data, int samps);
-  // hint - if >= 0, used as search hint
-  int process(int hint);
-  bool process_async(int hint);
 
-  int get_best_delay() { return best_delay <= 0 ? last_delay : best_delay; }
-  int get_2nd_best_delay() { return second_best_delay; }
-  int get_largest_delay() { return largest_delay; }
-  int get_best_quality() { return get_best_delay() >= 0 ? delay_quality[get_best_delay()] : 0; }
-  int get_best_hit() { return get_best_delay() >= 0 ? delay_hits[get_best_delay()] : 0; }
-  int get_far_samps() { return total_far_samps; }
-  int get_near_samps() { return total_near_samps; }
-  int is_processing();
   static bool silent(const short *data, int samps, short threshold_amp);
 
   // Estimate echo delay.
@@ -88,17 +52,12 @@ class delay_estimator {
   bool rich_nearend(const short *near, int near_size);
   int search_audio(short *haystack, int haystack_samps,
           short *needle, int needle_samps, float *quality);
-  int score_delay(int delay);
   // 返回nearend在回声消除后、前的信号强度之比，此值越小于1，意味着回声消除效果越
   // 好。通常 < 0.9 就意味着回声消除已经起作用了。
   float try_echo_cancel(
           const short *far, int far_size,
           const short *near, int near_size,
           int filter_size);
-
-  // treat |dst| array as a FIFO queue.
-  // return shorts been pushed |n|.
-  static int array_push(short *dst, int dst_len, int dst_capacity, short *src, int n);
 };
 
 #endif

@@ -42,7 +42,6 @@
 const int LOOP_FRAMES = 4;
 
 const int MAX_DELAY = 50;
-const int NEAREND_SIZE = 50; // 太短可能会得到完全错误的结果（取决于实际输入）
 // 回声延迟（以frame为单位）的有效值 >= 0，下面是几个特殊的无效值
 const int ECHO_DELAY_NULL = -1;
 const int ECHO_DELAY_FAILED = -2;
@@ -63,7 +62,6 @@ const int SPEEX_FILTER_SIZE = 8;
 //--------------------------------------------------------------------------------
 
 void cleanup();
-bool estimation_not_bad(delay_estimator *d);
 void fwrite_samps(short *frame, FILE *fd, int samps);
 void reverse_frame(short *frame, int samps);
 void speex_ec_open (int sampleRate, int bufsize, int totalSize);
@@ -122,7 +120,6 @@ short silence[FRAME_SAMPS];
 int playback_delay = 0; // samps
 int echo_delay = ECHO_DELAY_NULL; // samps, relative to playback
 int echo_delay2 = ECHO_DELAY_NULL; // samps, relative to playback, estimated by WebRtc 
-bool echo_delay2_desired = false;
 int64_t last_est_time = 0; // last time we got |echo_delay2|
 // 记录最近一次评估回声延迟时得到的最好消除效果（输出、输入信号强度之比），作为
 // stat_ec() 中判断当前回声消除是否有效的参考标准。之所以需要这么一个动态标准，
@@ -176,7 +173,7 @@ void align_farend_buf(int n, short *last_render_frame, int last_render_samps)
     last_render_frame += last_render_samps - PAD_SAMPS;
     last_render_samps -= PAD_SAMPS;
   }
-  memcpy(rframe, last_render_frame, last_render_samps * sizeof(short));
+  memcpy(rframe, last_render_frame, last_render_samps * SAMPLE_SIZE);
   reverse_frame(rframe, last_render_samps);
   short *p = rframe;
   while (n > 0) {
@@ -288,7 +285,6 @@ void start(JNIEnv *env, jint track_min_buf_size, jint record_min_buf_size,
   // - echo_delay2 要么为 NULL 要么为 echo_delay，若为前者，
   //    runNearendProcessing() 将创建一个线程来运行 estimate_delay()。
   //    一旦 echo_delay2 被计算出来，就会用来修正 echo_delay。
-  echo_delay2_desired = echo_delay_ms < 0;
   if (echo_delay_ms < 0) {
     echo_delay = 10;
     echo_delay2 = ECHO_DELAY_NULL; // 要求动态评估
@@ -298,9 +294,8 @@ void start(JNIEnv *env, jint track_min_buf_size, jint record_min_buf_size,
     echo_delay2 = ECHO_DELAY_NULL; // 要求动态评估
   }
 
-  const int sample_size = sizeof(short);
-  in_buffer_cnt = ceil((float)record_min_buf_size / sample_size / FRAME_SAMPS);
-  out_buffer_cnt = ceil((float)track_min_buf_size / sample_size / FRAME_SAMPS);
+  in_buffer_cnt = ceil((float)record_min_buf_size / SAMPLE_SIZE / FRAME_SAMPS);
+  out_buffer_cnt = ceil((float)track_min_buf_size / SAMPLE_SIZE / FRAME_SAMPS);
 
   I("AudioRecord min buf size %dB, AudioTrack min buf size %dB",
       record_min_buf_size, track_min_buf_size);
@@ -687,7 +682,7 @@ int estimate_delay(int use_mem_data)
     fclose(fd_n);
   }
 
-  delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
+  delayEst = new delay_estimator(SR, FRAME_SAMPS);
   result = delayEst->estimate(
       far_est_buf, far_est_size,
       near_est_buf, near_est_size,
@@ -717,143 +712,6 @@ END:
   delay_est_thrd_stopped = true;
   last_est_time = timestamp(0);
   return 0;
-}
-
-int estimate_delay_bak(int async)
-{
-  static int cnt = -1;
-
-  // 全局变量 |on| 的初衷是用来控制 runNearendProcessing() 的，
-  // estimate_delay() 既可以被 runNearendProcessing() 调用，也可以直接调用，
-  // 仅在前一种情况中，它受 |on| 控制。
-  bool watch_on = on;
-
-  int pri = getpriority(PRIO_PROCESS, 0);
-  setpriority(PRIO_PROCESS, 0, 0);
-  I("estimate_delay, niceness: %d=>%d", pri, getpriority(PRIO_PROCESS, 0));
-
-  I("start estimate_delay, #%d", ++cnt);
-
-  short far[MAX_DELAY * FRAME_SAMPS];
-  short near[FRAME_SAMPS];
-  delayEst = new delay_estimator(SR, FRAME_SAMPS, MAX_DELAY, NEAREND_SIZE );
-
-  FILE *fd_f = fopen("/mnt/sdcard/tmp/far2.raw", "r");
-  FILE *fd_n = fopen("/mnt/sdcard/tmp/near2.raw", "r");
-  if (!fd_f || !fd_n) {
-      E("failed to open dump files at %d", __LINE__ );
-      return 0;
-  }
-
-  int64_t t0 = timestamp(0);
-  int result = -1;
-  int i = 0;
-  int skip_countdown = 0;
-  // 描述 delay_estimator::process() 结果的惯性：
-  // 成功就 +1；失败就 -1；交替就清零。
-  int inertance = 0;
-  bool echo_delay2_adjusted = false;
-  fseek(fd_n, i * FRAME_SAMPS * 2, SEEK_SET);
-  while(!watch_on || on)
-  {
-    if (FRAME_SAMPS != fread(far, 2, FRAME_SAMPS, fd_f))
-      break;
-    delayEst->add_far(far, FRAME_SAMPS);
-
-    if (FRAME_SAMPS != fread(near, 2, FRAME_SAMPS, fd_n))
-      break;
-
-    delayEst->add_near(near, FRAME_SAMPS);
-
-    // 减少搜索次数，希望不会影响结果的正确性
-    if (--skip_countdown > 0) {
-      continue;
-    }
-
-    int hint = delayEst->get_largest_delay() > 0
-      ? delayEst->get_largest_delay() : echo_delay + DELAY_TOL;
-    if (!async) {
-      // sync call
-      result = delayEst->process(hint);
-      if (result < 0) {
-        skip_countdown = 5;
-        if (inertance >= 0) {
-          inertance = -1;
-        } else {
-          --inertance;
-        }
-        // 如果连续失败好多次，而且之前已经有了不错的结果，就早点结束
-        if (inertance < -2
-            && estimation_not_bad(delayEst)) {
-          I("estimate_delay, end early, case #2");
-          break;
-        }
-        continue;
-      } else {
-        skip_countdown = 2;
-        if (inertance <= 0) {
-          inertance = 1;
-        } else {
-          ++inertance;
-        }
-      }
-    } else {
-      // async call
-      if (delayEst->get_near_samps() > NEAREND_SIZE) {
-        delayEst->process_async(hint);
-      } else {
-        D("near samps %d", delayEst->get_near_samps());
-      }
-      usleep(FRAME_MS * 1000);
-    }
-
-    if (result >= 0
-        && estimation_not_bad(delayEst)) {
-      // 得到了一个质量不太差的结果
-      
-      result = delayEst->get_best_delay();
-      if (echo_delay2_desired) {
-        // 刷新输出结果，但不放弃搜索
-        I("estimate_delay, output early");
-        echo_delay2 = result - DELAY_TOL;
-        echo_delay2_desired = false;
-      } else if (result >= echo_delay && result <= echo_delay + DELAY_TOL) {
-        // 这个结果与 |echo_delay| 基本一致，那么二者都正确的可能性比较高，无需
-        // 继续验证了。
-        I("estimate_delay, end early");
-        adjust_echo_delay2(result);
-        echo_delay2_adjusted = true;
-        break;
-      }
-    }
-  }
-
-  if (!echo_delay2_adjusted && estimation_not_bad(delayEst)) {
-    result = delayEst->get_best_delay();
-    adjust_echo_delay2(result);
-  }
-
-  I("delay estimation done, result %d, elapse %dms", result, (int)timestamp(t0));
-  I("got echo_delay2 %d", echo_delay2);
-
-  fclose(fd_f);
-  fclose(fd_n);
-  if (delayEst) {
-    delete delayEst;
-    delayEst = NULL;
-  }
-  delay_est_thrd_stopped = true;
-  last_est_time = timestamp(0);
-  return 0;
-}
-
-bool estimation_not_bad(delay_estimator *d)
-{
-  const int MIN_SUCC = 10; // <=0 表示无限
-  const int MIN_HIT = 5;
-  return (MIN_SUCC <= 0
-      || delayEst->succ_times >= MIN_SUCC)
-    && delayEst->get_best_hit() >= MIN_HIT;
 }
 
 int pull(JNIEnv *env, jshortArray buf)
