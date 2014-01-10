@@ -983,13 +983,15 @@ void stat_ec(const short *inbuffer, const short *outbuffer, int samps)
   if (stat_samps > FRAME_SAMPS * FRAME_RATE * duration_sec) {
     bool touched = false;
     curr_ec_ratio = (float)sum2 / sum1;
-    if (curr_ec_ratio < std::max(0.3f, recent_best_ec_ratio * 1.1f)) {
+    if (curr_ec_ratio < std::max(0.3f, std::min(0.5f,
+            recent_best_ec_ratio * 1.1f))) {
       // touch timestamp
       last_est_time = std::max(last_est_time,
           timestamp(0) - duration_sec * 1000);
       touched = true;
     }
-    D("stat_ec, %0.2f @%ds %s", curr_ec_ratio, (int)(timestamp(t_start) / 1000),
+    I("stat_ec, %d:%0.2f @%ds %s", echo_delay, curr_ec_ratio,
+        (int)(timestamp(t_start) / 1000),
         (touched ? "(valid)" : ""));
     stat_samps = 0;
     sum1 = sum2 = 0;
