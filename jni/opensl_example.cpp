@@ -134,6 +134,7 @@ int in_buffer_cnt = 0;
 int out_buffer_cnt = 0;
 
 bool dump_raw = false;
+const bool dump_est_raw = true;
 
 // 用于评估回声延迟的缓冲区
 short far_est_buf[EST_BUF_CAPACITY];
@@ -224,10 +225,8 @@ void fwrite_samps(short *frame, FILE *fd, int samps)
   }
 }
 
-// TODO rename to open_est_dump_files
-void open_log_files()
+void open_est_dump_files()
 {
-  //I("open_log_files");
   const char *mode = "w+";
   int r = mkdir("/mnt/sdcard/tmp", 755);
   if (r == 0 || errno == EEXIST) {
@@ -253,10 +252,8 @@ void open_dump_files(const char *mode)
   }
 }
 
-// TODO rename to close_est_dump_files
-void close_log_files()
+void close_est_dump_files()
 {
-  //I("close_log_files");
   if (fd_farend2)
     fclose(fd_farend2);
   if (fd_nearend2)
@@ -442,11 +439,11 @@ void runNearendProcessing()
           read_circular_buffer(capture_hist, near_est_buf, EST_BUF_CAPACITY);
 
           far_est_size = near_est_size = EST_BUF_CAPACITY;
-          if (dump_raw) {
-            open_log_files();
+          if (dump_est_raw) {
+            open_est_dump_files();
             fwrite_samps(far_est_buf, fd_farend2, far_est_size);
             fwrite_samps(near_est_buf, fd_nearend2, near_est_size);
-            close_log_files();
+            close_est_dump_files();
           }
 
           // start estimation thread
