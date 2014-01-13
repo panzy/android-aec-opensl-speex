@@ -21,8 +21,7 @@ public class opensl_exampleJNI {
     }
   }
 
-  public final static native void start__SWIG_0(int jarg2, int jarg3, int jarg4, int jarg5, int jarg6);
-  public final static native void start__SWIG_1(int jarg2, int jarg3, int jarg4, int jarg5);
+  public final static native void start(int jarg2, int jarg3, int jarg4, int jarg5, int jarg6, int jarg7);
   public final static native void runNearendProcessing();
   public final static native void stop();
   public final static native int push(short[] jarg2);

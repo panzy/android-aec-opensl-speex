@@ -275,7 +275,8 @@ void close_dump_files()
 }
 
 void start(JNIEnv *env, jint track_min_buf_size, jint record_min_buf_size,
-    jint playback_delay_ms, jint echo_delay_ms, jint _dump_raw)
+    jint playback_delay_ms, jint echo_delay_ms, jint _dump_raw,
+    jint is_aec_available)
 {
   dump_raw = _dump_raw;
   playback_delay = playback_delay_ms / FRAME_MS;
@@ -318,7 +319,8 @@ void start(JNIEnv *env, jint track_min_buf_size, jint record_min_buf_size,
       in_buffer_cnt,
       FRAME_SAMPS,
       out_buffer_cnt,
-      get_api_level(env));
+      get_api_level(env),
+      is_aec_available);
   if(p == NULL) return; 
 
   farend_buf_size =  FRAME_SAMPS * std::max(FRAME_RATE * 5, 20 + playback_delay);
@@ -883,29 +885,29 @@ void offline_process()
 
 static jint get_api_level(JNIEnv *env)
 {
-    if ((env)->ExceptionCheck())
-        return false; // already got an exception pending
+  if ((env)->ExceptionCheck())
+    return false; // already got an exception pending
 
-    bool success = true;
+  bool success = true;
 
-    // VERSION is a nested class within android.os.Build (hence "$" rather than "/")
-    jclass versionClass = (env)->FindClass("android/os/Build$VERSION");
-    if (NULL == versionClass)
-        success = false;
+  // VERSION is a nested class within android.os.Build (hence "$" rather than "/")
+  jclass versionClass = (env)->FindClass("android/os/Build$VERSION");
+  if (NULL == versionClass)
+    success = false;
 
-    jfieldID sdkIntFieldID = NULL;
-    if (success)
-        success = (NULL != (sdkIntFieldID = (env)->GetStaticFieldID(versionClass, "SDK_INT", "I")));
+  jfieldID sdkIntFieldID = NULL;
+  if (success)
+    success = (NULL != (sdkIntFieldID = (env)->GetStaticFieldID(versionClass, "SDK_INT", "I")));
 
-    jint sdkInt = 0;
-    if (success)
-    {
-        sdkInt = (env)->GetStaticIntField(versionClass, sdkIntFieldID);
-        __android_log_print(ANDROID_LOG_VERBOSE, TAG, "sdkInt = %d", sdkInt);
-    }
+  jint sdkInt = 0;
+  if (success)
+  {
+    sdkInt = (env)->GetStaticIntField(versionClass, sdkIntFieldID);
+    __android_log_print(ANDROID_LOG_VERBOSE, TAG, "sdkInt = %d", sdkInt);
+  }
 
-    // cleanup
-    (env)->DeleteLocalRef(versionClass);
+  // cleanup
+  (env)->DeleteLocalRef(versionClass);
 
-    return sdkInt;
+  return sdkInt;
 }

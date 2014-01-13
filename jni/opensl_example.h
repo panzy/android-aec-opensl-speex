@@ -50,7 +50,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * */
 void start(JNIEnv *env, jint audio_track_min_buf_size, jint
     audio_record_min_buf_size, jint playback_delay_ms, jint echo_delay_ms,
-    jint _dump_raw = 0);
+    jint _dump_raw,
+    jint is_aec_available);
 /* 持续处理录音。*/
 void runNearendProcessing();
 /* 结束播放和录音。*/

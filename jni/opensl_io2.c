@@ -352,10 +352,15 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
     result = (*p->recorderObject)->GetInterface(p->recorderObject, SL_IID_ANDROIDCONFIGURATION, &recorderConfig);
     if(result == SL_RESULT_SUCCESS) {
       SLint32 streamType = SL_ANDROID_RECORDING_PRESET_GENERIC;
-      if(p->os_api_level >= 11){
+      if(p->os_api_level >= 11 && p->is_aec_available){
         // SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION = 4
         // 此配置会启用Android系统内置的回声消除功能（若设备支持的话）。
         // 由于我们目前采用的NDK是android-9，头文件中没有这个常量。
+        //
+        // XXX 问题在于，有些设备声称实现了AEC，但实际上没有，这种情况下
+        // SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION 反而比
+        // SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION 更糟糕，因为前者的
+        // 近端可能失真因而不利于 Speex。
         streamType = 4;
         I("config recorder, android-%d, stream type=SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION", p->os_api_level); 
       } else {
@@ -489,7 +494,8 @@ static void openSLDestroyEngine(OPENSL_STREAM *p){
 OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
         int in_buffer_frames, int in_buffer_cnt,
         int out_buffer_frames, int out_buffer_cnt,
-        int os_api_level){
+        int os_api_level,
+        int is_aec_available){
   
   OPENSL_STREAM *p;
   p = (OPENSL_STREAM *) malloc(sizeof(OPENSL_STREAM));
@@ -498,6 +504,7 @@ OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
   p->outchannels = outchannels;
   p->sr = sr;
   p->os_api_level = os_api_level;
+  p->is_aec_available = is_aec_available;
   pthread_mutex_init(&p->playerLock, NULL);
  
   if((p->outBufSamples  =  out_buffer_frames*outchannels) != 0) {

@@ -218,13 +218,14 @@ static void SWIGUNUSED SWIG_JavaThrowException(JNIEnv *jenv, SWIG_JavaExceptionC
 extern "C" {
 #endif
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_start_1_1SWIG_10(JNIEnv *jenv, jclass jcls, jint jarg2, jint jarg3, jint jarg4, jint jarg5, jint jarg6) {
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_start(JNIEnv *jenv, jclass jcls, jint jarg2, jint jarg3, jint jarg4, jint jarg5, jint jarg6, jint jarg7) {
   JNIEnv *arg1 = (JNIEnv *) 0 ;
   jint arg2 ;
   jint arg3 ;
   jint arg4 ;
   jint arg5 ;
   jint arg6 ;
+  jint arg7 ;
   
   (void)jenv;
   (void)jcls;
@@ -236,27 +237,8 @@ SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_start_1_1SWIG_10
   arg4 = jarg4; 
   arg5 = jarg5; 
   arg6 = jarg6; 
-  start(arg1,arg2,arg3,arg4,arg5,arg6);
-}
-
-
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_start_1_1SWIG_11(JNIEnv *jenv, jclass jcls, jint jarg2, jint jarg3, jint jarg4, jint jarg5) {
-  JNIEnv *arg1 = (JNIEnv *) 0 ;
-  jint arg2 ;
-  jint arg3 ;
-  jint arg4 ;
-  jint arg5 ;
-  
-  (void)jenv;
-  (void)jcls;
-  
-  arg1 = jenv;
-  
-  arg2 = jarg2; 
-  arg3 = jarg3; 
-  arg4 = jarg4; 
-  arg5 = jarg5; 
-  start(arg1,arg2,arg3,arg4,arg5);
+  arg7 = jarg7; 
+  start(arg1,arg2,arg3,arg4,arg5,arg6,arg7);
 }
 
 

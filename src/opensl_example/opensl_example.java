@@ -9,12 +9,8 @@
 package opensl_example;
 
 public class opensl_example {
-  public static void start(int audio_track_min_buf_size, int audio_record_min_buf_size, int playback_delay_ms, int echo_delay_ms, int _dump_raw) {
-    opensl_exampleJNI.start__SWIG_0(audio_track_min_buf_size, audio_record_min_buf_size, playback_delay_ms, echo_delay_ms, _dump_raw);
-  }
-
-  public static void start(int audio_track_min_buf_size, int audio_record_min_buf_size, int playback_delay_ms, int echo_delay_ms) {
-    opensl_exampleJNI.start__SWIG_1(audio_track_min_buf_size, audio_record_min_buf_size, playback_delay_ms, echo_delay_ms);
+  public static void start(int audio_track_min_buf_size, int audio_record_min_buf_size, int playback_delay_ms, int echo_delay_ms, int _dump_raw, int is_aec_available) {
+    opensl_exampleJNI.start(audio_track_min_buf_size, audio_record_min_buf_size, playback_delay_ms, echo_delay_ms, _dump_raw, is_aec_available);
   }
 
   public static void runNearendProcessing() {

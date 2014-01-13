@@ -38,6 +38,7 @@ import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
+import android.media.audiofx.AcousticEchoCanceler;
 import android.os.Build;
 import android.os.Environment;
 import android.util.Log;
@@ -214,7 +215,12 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
         };
 
         int echo_delay_ms = getSharedPreferences("aec", 0).getInt("echo_delay_ms", -1);
-        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms, dump_raw);
+        int aec= 0;
+        if (Build.VERSION.SDK_INT >= 16) {
+            if(AcousticEchoCanceler.isAvailable())
+                aec = 1;
+        }
+        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms, dump_raw, aec);
         thread.start();
         thread2.start();
         thread3.start();
@@ -266,6 +272,11 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
         PackageManager pm = this.getPackageManager();
         boolean claimsFeature = pm.hasSystemFeature(PackageManager.FEATURE_AUDIO_LOW_LATENCY);
         Log.d(TAG, "has feature audio low latency: " + claimsFeature);
+
+        if (Build.VERSION.SDK_INT >= 16) {
+            Log.d(TAG, "Checks if the device implements acoustic echo cancellation: " +
+                AcousticEchoCanceler.isAvailable());
+        }
     }
 
     public void onDestroy(){
