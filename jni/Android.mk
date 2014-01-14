@@ -1,9 +1,9 @@
 LOCAL_PATH := $(call my-dir)
 
-include $(CLEAR_VARS)
-LOCAL_MODULE := libwebrtc_audio_preprocessing
-LOCAL_SRC_FILES := /home/panzy/workspace/webrtc/obj/local/$(TARGET_ARCH_ABI)/libwebrtc_audio_preprocessing.so
-include $(PREBUILT_SHARED_LIBRARY)
+#include $(CLEAR_VARS)
+#LOCAL_MODULE := libwebrtc_audio_preprocessing
+#LOCAL_SRC_FILES := /home/panzy/workspace/webrtc/obj/local/$(TARGET_ARCH_ABI)/libwebrtc_audio_preprocessing.so
+#include $(PREBUILT_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := libspeex
@@ -25,7 +25,7 @@ opensl_io2.c\
 delay_estimator.cpp \
 java_interface_wrap.cpp 
 
-LOCAL_SHARED_LIBRARIES := libwebrtc_audio_preprocessing libspeex
+LOCAL_SHARED_LIBRARIES := libspeex
 
 LOCAL_LDLIBS := -llog -lOpenSLES
 
