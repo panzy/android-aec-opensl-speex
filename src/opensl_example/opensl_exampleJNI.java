@@ -12,7 +12,6 @@ public class opensl_exampleJNI {
 
   static {
     try {
-        java.lang.System.loadLibrary("webrtc_audio_preprocessing");
         java.lang.System.loadLibrary("speex");
         java.lang.System.loadLibrary("opensl_example");
     } catch (UnsatisfiedLinkError e) {

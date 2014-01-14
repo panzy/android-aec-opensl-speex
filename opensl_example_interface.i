@@ -35,7 +35,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 %pragma(java) jniclasscode=%{
   static {
     try {
-        java.lang.System.loadLibrary("webrtc_audio_preprocessing");
         java.lang.System.loadLibrary("speex");
         java.lang.System.loadLibrary("opensl_example");
     } catch (UnsatisfiedLinkError e) {
