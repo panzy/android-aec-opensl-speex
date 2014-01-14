@@ -28,16 +28,14 @@
 */
 
 #include "opensl_io2.h"
-#define CONV16BIT 32768
-#define CONVMYFLT (1./32768.)
-#define GRAIN 4
 
+#define TAG "aec_opensl"
+
+static SLuint32 openSLChooseInputDevice(OPENSL_STREAM *p);
 static void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context);
 static void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context);
-circular_buffer* create_circular_buffer(int bytes);
+circular_buffer* create_circular_buffer(int count);
 int checkspace_circular_buffer(circular_buffer *p, int writeCheck);
-int read_circular_buffer_bytes(circular_buffer *p, char *out, int bytes);
-int write_circular_buffer_bytes(circular_buffer *p, const char *in, int bytes);
 void free_circular_buffer (circular_buffer *p);
 
 // creates the OpenSL ES audio engine
@@ -61,118 +59,192 @@ static SLresult openSLCreateEngine(OPENSL_STREAM *p)
 }
 
 // opens the OpenSL ES device for output
-static SLresult openSLPlayOpen(OPENSL_STREAM *p)
+//
+// streamType - Audio playback stream type, see SL_ANDROID_STREAM_* constants in
+//              <SLES/OpenSLES_AndroidConfiguration.h>, eg,
+//              SL_ANDROID_STREAM_VOICE,
+//              SL_ANDROID_STREAM_MEDIA.
+SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType)
 {
   SLresult result;
   SLuint32 sr = p->sr;
   SLuint32  channels = p->outchannels;
 
-  if(channels){
-    // configure audio source
-    SLDataLocator_AndroidSimpleBufferQueue loc_bufq = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
+  if (0 == pthread_mutex_trylock(&p->playerLock)) {
+    if(channels){
+      // configure audio source
+      SLDataLocator_AndroidSimpleBufferQueue loc_bufq = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
 
-    switch(sr){
+      switch(sr){
 
-    case 8000:
-      sr = SL_SAMPLINGRATE_8;
-      break;
-    case 11025:
-      sr = SL_SAMPLINGRATE_11_025;
-      break;
-    case 16000:
-      sr = SL_SAMPLINGRATE_16;
-      break;
-    case 22050:
-      sr = SL_SAMPLINGRATE_22_05;
-      break;
-    case 24000:
-      sr = SL_SAMPLINGRATE_24;
-      break;
-    case 32000:
-      sr = SL_SAMPLINGRATE_32;
-      break;
-    case 44100:
-      sr = SL_SAMPLINGRATE_44_1;
-      break;
-    case 48000:
-      sr = SL_SAMPLINGRATE_48;
-      break;
-    case 64000:
-      sr = SL_SAMPLINGRATE_64;
-      break;
-    case 88200:
-      sr = SL_SAMPLINGRATE_88_2;
-      break;
-    case 96000:
-      sr = SL_SAMPLINGRATE_96;
-      break;
-    case 192000:
-      sr = SL_SAMPLINGRATE_192;
-      break;
-    default:
-      return -1;
+        case 8000:
+          sr = SL_SAMPLINGRATE_8;
+          break;
+        case 11025:
+          sr = SL_SAMPLINGRATE_11_025;
+          break;
+        case 16000:
+          sr = SL_SAMPLINGRATE_16;
+          break;
+        case 22050:
+          sr = SL_SAMPLINGRATE_22_05;
+          break;
+        case 24000:
+          sr = SL_SAMPLINGRATE_24;
+          break;
+        case 32000:
+          sr = SL_SAMPLINGRATE_32;
+          break;
+        case 44100:
+          sr = SL_SAMPLINGRATE_44_1;
+          break;
+        case 48000:
+          sr = SL_SAMPLINGRATE_48;
+          break;
+        case 64000:
+          sr = SL_SAMPLINGRATE_64;
+          break;
+        case 88200:
+          sr = SL_SAMPLINGRATE_88_2;
+          break;
+        case 96000:
+          sr = SL_SAMPLINGRATE_96;
+          break;
+        case 192000:
+          sr = SL_SAMPLINGRATE_192;
+          break;
+        default:
+          return -1;
+      }
+
+      const SLInterfaceID ids[] = {SL_IID_VOLUME};
+      const SLboolean req[] = {SL_BOOLEAN_FALSE};
+      result = (*p->engineEngine)->CreateOutputMix(p->engineEngine, &(p->outputMixObject), 1, ids, req);
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+      // realize the output mix
+      result = (*p->outputMixObject)->Realize(p->outputMixObject, SL_BOOLEAN_FALSE);
+
+      int speakers;
+      if(channels > 1) 
+        speakers = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
+      else speakers = SL_SPEAKER_FRONT_CENTER;
+      SLDataFormat_PCM format_pcm = {SL_DATAFORMAT_PCM,channels, sr,
+        SL_PCMSAMPLEFORMAT_FIXED_16, SL_PCMSAMPLEFORMAT_FIXED_16,
+        speakers, SL_BYTEORDER_LITTLEENDIAN};
+
+      SLDataSource audioSrc = {&loc_bufq, &format_pcm};
+
+      // configure audio sink
+      SLDataLocator_OutputMix loc_outmix = {SL_DATALOCATOR_OUTPUTMIX, p->outputMixObject};
+      SLDataSink audioSnk = {&loc_outmix, NULL};
+
+      // create audio player
+      const SLInterfaceID ids1[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE, SL_IID_ANDROIDCONFIGURATION, SL_IID_VOLUME};
+      const SLboolean req1[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
+      result = (*p->engineEngine)->CreateAudioPlayer(p->engineEngine, &(p->bqPlayerObject), &audioSrc, &audioSnk,
+          sizeof(ids1) / sizeof(SLInterfaceID), ids1, req1);
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+      // set stream type
+      p->bqPlayerStreamType = streamType;
+      SLAndroidConfigurationItf playerConfig;
+      result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject,
+          SL_IID_ANDROIDCONFIGURATION, &playerConfig);
+      assert(SL_RESULT_SUCCESS == result);
+      if (SL_RESULT_SUCCESS == result) {
+        result = (*playerConfig)->SetConfiguration(playerConfig,
+            SL_ANDROID_KEY_STREAM_TYPE, &streamType, sizeof(SLint32));
+        assert(SL_RESULT_SUCCESS == result);
+      }
+
+      // realize the player
+      result = (*p->bqPlayerObject)->Realize(p->bqPlayerObject, SL_BOOLEAN_FALSE);
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+      // get the play interface
+      result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_PLAY, &(p->bqPlayerPlay));
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+      // get the buffer queue interface
+      result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_ANDROIDSIMPLEBUFFERQUEUE,
+          &(p->bqPlayerBufferQueue));
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+      // register callback on the buffer queue
+      result = (*p->bqPlayerBufferQueue)->RegisterCallback(p->bqPlayerBufferQueue, bqPlayerCallback, p);
+      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+
+      SLVolumeItf volumeIf;
+      result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_VOLUME, &volumeIf);
+      if (result == SL_RESULT_SUCCESS) {
+        SLmillibel maxVolume, volume;
+        (*volumeIf)->GetMaxVolumeLevel(volumeIf, &maxVolume);
+        //(*volumeIf)->GetVolumeLevel(volumeIf, &volume);
+        //I("audio player volume, max %dmB, curr %dmB", maxVolume, volume);
+        // 在某些设备上，音量太大时录音会失真（波峰被截断了，可能是受音频格式PCM16
+        // 限制？），导致speex AEC失败。
+        volume = -300; // mB, 1dB=100mB
+        (*volumeIf)->SetVolumeLevel(volumeIf, volume);
+        (*volumeIf)->GetVolumeLevel(volumeIf, &volume);
+        I("audio player volume, max %dmB, curr %dmB", maxVolume, volume);
+      }
+
+      // set the player's state to playing
+      result = (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_PLAYING);
+
+      if((p->playBuffer = (short *) calloc(p->outBufSamples, sizeof(short))) == NULL) {
+        return -1;
+      }
+
+      (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue, 
+          p->playBuffer,p->outBufSamples*sizeof(short));
+
+end_openaudio:
+      return result;
     }
-   
-    const SLInterfaceID ids[] = {SL_IID_VOLUME};
-    const SLboolean req[] = {SL_BOOLEAN_FALSE};
-    result = (*p->engineEngine)->CreateOutputMix(p->engineEngine, &(p->outputMixObject), 1, ids, req);
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
-    // realize the output mix
-    result = (*p->outputMixObject)->Realize(p->outputMixObject, SL_BOOLEAN_FALSE);
-   
-    int speakers;
-    if(channels > 1) 
-      speakers = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
-    else speakers = SL_SPEAKER_FRONT_CENTER;
-    SLDataFormat_PCM format_pcm = {SL_DATAFORMAT_PCM,channels, sr,
-				   SL_PCMSAMPLEFORMAT_FIXED_16, SL_PCMSAMPLEFORMAT_FIXED_16,
-				   speakers, SL_BYTEORDER_LITTLEENDIAN};
-
-    SLDataSource audioSrc = {&loc_bufq, &format_pcm};
-
-    // configure audio sink
-    SLDataLocator_OutputMix loc_outmix = {SL_DATALOCATOR_OUTPUTMIX, p->outputMixObject};
-    SLDataSink audioSnk = {&loc_outmix, NULL};
-
-    // create audio player
-    const SLInterfaceID ids1[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE};
-    const SLboolean req1[] = {SL_BOOLEAN_TRUE};
-    result = (*p->engineEngine)->CreateAudioPlayer(p->engineEngine, &(p->bqPlayerObject), &audioSrc, &audioSnk,
-						   1, ids1, req1);
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
-    // realize the player
-    result = (*p->bqPlayerObject)->Realize(p->bqPlayerObject, SL_BOOLEAN_FALSE);
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
-    // get the play interface
-    result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_PLAY, &(p->bqPlayerPlay));
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
-    // get the buffer queue interface
-    result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_ANDROIDSIMPLEBUFFERQUEUE,
-						&(p->bqPlayerBufferQueue));
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
-    // register callback on the buffer queue
-    result = (*p->bqPlayerBufferQueue)->RegisterCallback(p->bqPlayerBufferQueue, bqPlayerCallback, p);
-    if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
-    // set the player's state to playing
-    result = (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_PLAYING);
-
-    if((p->playBuffer = (short *) calloc(p->outBufSamples, sizeof(short))) == NULL) {
-      return -1;
-    }
-
-    (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue, 
-				       p->playBuffer,p->outBufSamples*sizeof(short));
- 
-  end_openaudio:
-    return result;
+    pthread_mutex_unlock(&p->playerLock);
   }
   return SL_RESULT_SUCCESS;
+}
+
+void openSLPlayClose(OPENSL_STREAM *p){
+
+  // destroy buffer queue audio player object, and invalidate all associated interfaces
+  if (0 == pthread_mutex_trylock(&p->playerLock)) {
+    if (p->bqPlayerObject != NULL && p->bqPlayerPlay != NULL) {
+      SLuint32 state = SL_PLAYSTATE_PLAYING;
+      (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_STOPPED);
+      while(state != SL_PLAYSTATE_STOPPED)
+        (*p->bqPlayerPlay)->GetPlayState(p->bqPlayerPlay, &state);
+      (*p->bqPlayerObject)->Destroy(p->bqPlayerObject);
+      p->bqPlayerObject = NULL;
+      p->bqPlayerPlay = NULL;
+      p->bqPlayerBufferQueue = NULL;
+      p->bqPlayerEffectSend = NULL;
+    }
+    pthread_mutex_unlock(&p->playerLock);
+  }
+}
+
+SLint32 openSLPlayQueryStreamType(OPENSL_STREAM *p) {
+#if 1
+  return p->bqPlayerStreamType;
+#else
+  SLAndroidConfigurationItf playerConfig;
+  SLint32 result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject,
+      SL_IID_ANDROIDCONFIGURATION, &playerConfig);
+  assert(SL_RESULT_SUCCESS == result);
+  if (SL_RESULT_SUCCESS == result) {
+    SLint32 streamType;
+    SLint32 valueSize = sizeof(SLint32);
+    result = (*playerConfig)->GetConfiguration(playerConfig,
+        SL_ANDROID_KEY_STREAM_TYPE, &valueSize, &streamType);
+    assert(SL_RESULT_SUCCESS == result);
+    return streamType;
+  }
+  return -1;
+#endif
 }
 
 // Open the OpenSL ES device for input
@@ -225,10 +297,12 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
     default:
       return -1;
     }
+
+    SLuint32 mic_deviceId = openSLChooseInputDevice(p);
     
     // configure audio source
     SLDataLocator_IODevice loc_dev = {SL_DATALOCATOR_IODEVICE, SL_IODEVICE_AUDIOINPUT,
-				      SL_DEFAULTDEVICEID_AUDIOINPUT, NULL};
+				      mic_deviceId, NULL};
     SLDataSource audioSrc = {&loc_dev, NULL};
 
     // configure audio sink
@@ -244,11 +318,60 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
 
     // create audio recorder
     // (requires the RECORD_AUDIO permission)
-    const SLInterfaceID id[1] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE};
-    const SLboolean req[1] = {SL_BOOLEAN_TRUE};
+    const SLInterfaceID id[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE, SL_IID_ANDROIDCONFIGURATION};
+    const SLboolean req[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
     result = (*p->engineEngine)->CreateAudioRecorder(p->engineEngine, &(p->recorderObject), &audioSrc,
-						     &audioSnk, 1, id, req);
+						     &audioSnk, sizeof(id) / sizeof(SLInterfaceID), id, req);
     if (SL_RESULT_SUCCESS != result) goto end_recopen;
+
+    // set mic volume.
+    // 这部分代码应该是没问题的，不过还没遇到哪个手机实现了这个功能。
+    SLDeviceVolumeItf deviceVolumeItf;
+    result = (*p->engineObject)->GetInterface(p->engineObject, SL_IID_DEVICEVOLUME, &deviceVolumeItf);
+    if (result == SL_RESULT_SUCCESS) {
+      SLint32 vol;
+      (*deviceVolumeItf)->GetVolume(deviceVolumeItf, mic_deviceId, &vol);
+      I("audio recorder, curr vol %d", (int)vol);
+      // WebRTC 使用如下公式计算 mic volume:
+      // vol = ((volume * (_maxSpeakerVolume - _minSpeakerVolume)
+      //        + (int) (255 / 2)) / (255)) + _minSpeakerVolume;
+      //
+      // http://webrtc.googlecode.com/svn-history/r214/trunk/src/modules/audio_device/main/source/Android/audio_device_android_opensles.cc
+      (*deviceVolumeItf)->SetVolume(deviceVolumeItf, mic_deviceId, -300);
+      (*deviceVolumeItf)->GetVolume(deviceVolumeItf, mic_deviceId, &vol);
+      I("audio recorder, curr vol %d", (int)vol);
+    } else if (result == SL_RESULT_FEATURE_UNSUPPORTED) {
+      W("failed to set mic volume, result %d, SL_RESULT_FEATURE_UNSUPPORTED", (int)result);
+    }
+    else {
+      W("failed to set mic volume, result %d", (int)result);
+    }
+
+    // set recording preset
+    SLAndroidConfigurationItf recorderConfig;   
+    result = (*p->recorderObject)->GetInterface(p->recorderObject, SL_IID_ANDROIDCONFIGURATION, &recorderConfig);
+    if(result == SL_RESULT_SUCCESS) {
+      SLint32 streamType = SL_ANDROID_RECORDING_PRESET_GENERIC;
+      if(p->os_api_level >= 11 && p->is_aec_available){
+        // SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION = 4
+        // 此配置会启用Android系统内置的回声消除功能（若设备支持的话）。
+        // 由于我们目前采用的NDK是android-9，头文件中没有这个常量。
+        //
+        // XXX 问题在于，有些设备声称实现了AEC，但实际上没有，这种情况下
+        // SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION 反而比
+        // SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION 更糟糕，因为前者的
+        // 近端可能失真因而不利于 Speex。
+        streamType = 4;
+        I("config recorder, android-%d, stream type=SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION", p->os_api_level); 
+      } else {
+        streamType = SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION;
+        I("config recorder, android-%d, stream type=SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION", p->os_api_level); 
+      }
+      result = (*recorderConfig)->SetConfiguration(recorderConfig, SL_ANDROID_KEY_RECORDING_PRESET, &streamType, sizeof(SLint32));
+      if (result != SL_RESULT_SUCCESS) {
+        E("failed to config recorder");
+      }
+    }
 
     // realize the audio recorder
     result = (*p->recorderObject)->Realize(p->recorderObject, SL_BOOLEAN_FALSE);
@@ -275,7 +398,7 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
 
     (*p->recorderBufferQueue)->Enqueue(p->recorderBufferQueue, 
 				       p->recBuffer, p->inBufSamples*sizeof(short));
-     
+
   end_recopen: 
     return result;
   }
@@ -284,21 +407,60 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
 
 }
 
+static SLuint32 openSLChooseInputDevice(OPENSL_STREAM *p) {
+
+  SLuint32 mic_deviceId = SL_DEFAULTDEVICEID_AUDIOINPUT;
+  SLresult result;
+  SLAudioIODeviceCapabilitiesItf AudioIODeviceCapabilitiesItf;
+  int i;
+  result = (*p->engineObject)->GetInterface(p->engineObject, SL_IID_AUDIOIODEVICECAPABILITIES,
+      &AudioIODeviceCapabilitiesItf);
+  if (result == SL_RESULT_SUCCESS) {
+    const int MAX_NUMBER_INPUT_DEVICES = 5;
+    SLint32 numInputs = MAX_NUMBER_INPUT_DEVICES;
+    SLuint32 InputDeviceIDs[MAX_NUMBER_INPUT_DEVICES];
+    result = (*AudioIODeviceCapabilitiesItf)->GetAvailableAudioInputs(AudioIODeviceCapabilitiesItf,
+        &numInputs, InputDeviceIDs);
+    D("query mic devices: result %d, count %d", (int)result, (int)numInputs);
+    if (result == SL_RESULT_SUCCESS && numInputs > 0) {
+      SLAudioInputDescriptor AudioInputDescriptor;
+      for (i = 0; i < numInputs; ++i) {
+        result = (*AudioIODeviceCapabilitiesItf)->QueryAudioInputCapabilities(
+            AudioIODeviceCapabilitiesItf, InputDeviceIDs[i], &AudioInputDescriptor); 
+        D("see mic device id: %d", (int)InputDeviceIDs[i]);
+        if((AudioInputDescriptor.deviceConnection ==
+              SL_DEVCONNECTION_ATTACHED_WIRED)&&
+            (AudioInputDescriptor.deviceScope == SL_DEVSCOPE_USER)&&
+            (AudioInputDescriptor.deviceLocation ==
+             SL_DEVLOCATION_HEADSET))
+        {
+          mic_deviceId = InputDeviceIDs[i];
+          break;
+        }
+        else if((AudioInputDescriptor.deviceConnection ==
+              SL_DEVCONNECTION_INTEGRATED)&&
+            (AudioInputDescriptor.deviceScope ==
+             SL_DEVSCOPE_USER)&&
+            (AudioInputDescriptor.deviceLocation ==
+             SL_DEVLOCATION_HANDSET))
+        {
+          mic_deviceId = InputDeviceIDs[i];
+          break;
+        }
+      }
+    }
+  } else {
+    W("failed to get interface SL_IID_AUDIOIODEVICECAPABILITIES, result %d", (uint)result);
+  }
+  D("choose mic device id: 0x%08x", (uint)mic_deviceId);
+  return mic_deviceId;
+}
+
 // close the OpenSL IO and destroy the audio engine
 static void openSLDestroyEngine(OPENSL_STREAM *p){
 
   // destroy buffer queue audio player object, and invalidate all associated interfaces
-  if (p->bqPlayerObject != NULL) {
-    SLuint32 state = SL_PLAYSTATE_PLAYING;
-    (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_STOPPED);
-    while(state != SL_PLAYSTATE_STOPPED)
-      (*p->bqPlayerPlay)->GetPlayState(p->bqPlayerPlay, &state);
-    (*p->bqPlayerObject)->Destroy(p->bqPlayerObject);
-    p->bqPlayerObject = NULL;
-    p->bqPlayerPlay = NULL;
-    p->bqPlayerBufferQueue = NULL;
-    p->bqPlayerEffectSend = NULL;
-  }
+  openSLPlayClose(p);
 
   // destroy audio recorder object, and invalidate all associated interfaces
   if (p->recorderObject != NULL) {
@@ -329,7 +491,11 @@ static void openSLDestroyEngine(OPENSL_STREAM *p){
 
 
 // open the android audio device for input and/or output
-OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels, int bufferframes){
+OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
+        int in_buffer_frames, int in_buffer_cnt,
+        int out_buffer_frames, int out_buffer_cnt,
+        int os_api_level,
+        int is_aec_available){
   
   OPENSL_STREAM *p;
   p = (OPENSL_STREAM *) malloc(sizeof(OPENSL_STREAM));
@@ -337,26 +503,29 @@ OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels, 
   p->inchannels = inchannels;
   p->outchannels = outchannels;
   p->sr = sr;
+  p->os_api_level = os_api_level;
+  p->is_aec_available = is_aec_available;
+  pthread_mutex_init(&p->playerLock, NULL);
  
-  if((p->outBufSamples  =  bufferframes*outchannels) != 0) {
+  if((p->outBufSamples  =  out_buffer_frames*outchannels) != 0) {
     if((p->outputBuffer = (short *) calloc(p->outBufSamples, sizeof(short))) == NULL) {
       android_CloseAudioDevice(p);
       return NULL;
     }
   }
 
-  if((p->inBufSamples  =  bufferframes*inchannels) != 0){
+  if((p->inBufSamples  =  in_buffer_frames*inchannels) != 0){
     if((p->inputBuffer = (short *) calloc(p->inBufSamples, sizeof(short))) == NULL){
       android_CloseAudioDevice(p);
       return NULL; 
     }
   }
 
-  if((p->outrb = create_circular_buffer(p->outBufSamples*sizeof(short)*4)) == NULL) {
+  if((p->outrb = create_circular_buffer(p->outBufSamples*out_buffer_cnt)) == NULL) {
       android_CloseAudioDevice(p);
       return NULL; 
   }
- if((p->inrb = create_circular_buffer(p->outBufSamples*sizeof(short)*4)) == NULL) {
+ if((p->inrb = create_circular_buffer(p->inBufSamples*out_buffer_cnt)) == NULL) {
       android_CloseAudioDevice(p);
       return NULL; 
   }
@@ -371,7 +540,7 @@ OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels, 
     return NULL;
   } 
 
-  if(openSLPlayOpen(p) != SL_RESULT_SUCCESS) {
+  if(openSLPlayOpen(p, SL_ANDROID_STREAM_MEDIA) != SL_RESULT_SUCCESS) {
     android_CloseAudioDevice(p);
     return NULL;
   }  
@@ -411,6 +580,7 @@ void android_CloseAudioDevice(OPENSL_STREAM *p){
   free_circular_buffer(p->inrb);
   free_circular_buffer(p->outrb);
 
+  pthread_mutex_destroy(&p->playerLock);
   free(p);
 }
 
@@ -424,20 +594,22 @@ double android_GetTimestamp(OPENSL_STREAM *p){
 void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
   OPENSL_STREAM *p = (OPENSL_STREAM *) context;
-  int bytes = p->inBufSamples*sizeof(short);
-  write_circular_buffer_bytes(p->inrb, (char *) p->recBuffer,bytes);
-  (*p->recorderBufferQueue)->Enqueue(p->recorderBufferQueue,p->recBuffer,bytes);
+  int count = p->inBufSamples;
+  if (write_circular_buffer(p->inrb, p->recBuffer,count) < count) {
+    E("record buffer overflow");
+  }
+  (*p->recorderBufferQueue)->Enqueue(p->recorderBufferQueue,p->recBuffer,
+          count*sizeof(short));
 }
  
 // gets a buffer of size samples from the device
-int android_AudioIn(OPENSL_STREAM *p,float *buffer,int size){
+int android_AudioIn(OPENSL_STREAM *p,short *buffer,int size){
   short *inBuffer;
-  int i, bytes = size*sizeof(short);
+  int i;
   if(p == NULL ||  p->inBufSamples ==  0) return 0;
-  bytes = read_circular_buffer_bytes(p->inrb,(char *)p->inputBuffer,bytes);
-  size = bytes/sizeof(short);
+  size = read_circular_buffer(p->inrb,p->inputBuffer,size);
   for(i=0; i < size; i++){
-    buffer[i] = (float) p->inputBuffer[i]*CONVMYFLT;
+    buffer[i] =  p->inputBuffer[i];
   }
   if(p->outchannels == 0) p->time += (double) size/(p->sr*p->inchannels);
   return size;
@@ -447,34 +619,74 @@ int android_AudioIn(OPENSL_STREAM *p,float *buffer,int size){
 void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
   OPENSL_STREAM *p = (OPENSL_STREAM *) context;
-  int bytes = p->outBufSamples*sizeof(short);
-  read_circular_buffer_bytes(p->outrb, (char *) p->playBuffer,bytes);
-  (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue,p->playBuffer,bytes);
+  int count = read_circular_buffer(p->outrb,p->playBuffer,p->outBufSamples);
+  if (count < p->outBufSamples) {
+      memset(p->playBuffer + count * sizeof(short), 0,
+              (p->outBufSamples - count) * sizeof(short));
+      count = p->outBufSamples;
+  }
+  (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue,
+          p->playBuffer,count*sizeof(short));
 }
 
-// puts a buffer of size samples to the device
-int android_AudioOut(OPENSL_STREAM *p, float *buffer,int size){
+// return: 0 or count.
+int read_circular_buffer(circular_buffer *p, short *out, int count){
+  int remaining;
+  int size = p->size;
+  int i=0, rp = p->rp;
+  short *buffer = p->buffer;
+  if ((remaining = checkspace_circular_buffer(p, 0)) < count) {
+    return 0;
+  }
+  for(i=0; i < count; i++){
+    out[i] = buffer[rp++];
+    if(rp == size) rp = 0;
+  }
+  p->rp = rp;
+  return count;
+}
+
+int write_circular_buffer(circular_buffer *p, const short *in, int count){
+  int remaining;
+  int countwrite, size = p->size;
+  int i=0, wp = p->wp;
+  short *buffer = p->buffer;
+  if ((remaining = checkspace_circular_buffer(p, 1)) == 0) {
+    return 0;
+  }
+  countwrite = count > remaining ? remaining : count;
+  for(i=0; i < countwrite; i++){
+    buffer[wp++] = in[i];
+    if(wp == size) wp = 0;
+  }
+  p->wp = wp;
+  return countwrite;
+}
+
+// puts a buffer of size samples to the device.
+// non-block.
+int android_AudioOut(OPENSL_STREAM *p, short *buffer,int size){
 
   short *outBuffer, *inBuffer;
-  int i, bytes = size*sizeof(short);
+  int i, count = size;
   if(p == NULL  ||  p->outBufSamples ==  0)  return 0;
   for(i=0; i < size; i++){
-    p->outputBuffer[i] = (short) (buffer[i]*CONV16BIT);
+    p->outputBuffer[i] = buffer[i];
   }
-  bytes = write_circular_buffer_bytes(p->outrb, (char *) p->outputBuffer,bytes);
+  count = write_circular_buffer(p->outrb, p->outputBuffer,count);
   p->time += (double) size/(p->sr*p->outchannels);
-  return bytes/sizeof(short);
+  return count;
 }
 
-circular_buffer* create_circular_buffer(int bytes){
+circular_buffer* create_circular_buffer(int count){
   circular_buffer *p;
   if ((p = calloc(1, sizeof(circular_buffer))) == NULL) {
     return NULL;
   }
-  p->size = bytes;
+  p->size = count;
   p->wp = p->rp = 0;
    
-  if ((p->buffer = calloc(bytes, sizeof(char))) == NULL) {
+  if ((p->buffer = calloc(count, sizeof(short))) == NULL) {
     free (p);
     return NULL;
   }
@@ -495,43 +707,10 @@ int checkspace_circular_buffer(circular_buffer *p, int writeCheck){
   }	
 }
 
-int read_circular_buffer_bytes(circular_buffer *p, char *out, int bytes){
-  int remaining;
-  int bytesread, size = p->size;
-  int i=0, rp = p->rp;
-  char *buffer = p->buffer;
-  if ((remaining = checkspace_circular_buffer(p, 0)) == 0) {
-    return 0;
-  }
-  bytesread = bytes > remaining ? remaining : bytes;
-  for(i=0; i < bytesread; i++){
-    out[i] = buffer[rp++];
-    if(rp == size) rp = 0;
-  }
-  p->rp = rp;
-  return bytesread;
-}
-
-int write_circular_buffer_bytes(circular_buffer *p, const char *in, int bytes){
-  int remaining;
-  int byteswrite, size = p->size;
-  int i=0, wp = p->wp;
-  char *buffer = p->buffer;
-  if ((remaining = checkspace_circular_buffer(p, 1)) == 0) {
-    return 0;
-  }
-  byteswrite = bytes > remaining ? remaining : bytes;
-  for(i=0; i < byteswrite; i++){
-    buffer[wp++] = in[i];
-    if(wp == size) wp = 0;
-  }
-  p->wp = wp;
-  return byteswrite;
-}
-
 void
 free_circular_buffer (circular_buffer *p){
   if(p == NULL) return;
   free(p->buffer);
   free(p);
 }
+

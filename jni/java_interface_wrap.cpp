@@ -218,24 +218,41 @@ static void SWIGUNUSED SWIG_JavaThrowException(JNIEnv *jenv, SWIG_JavaExceptionC
 extern "C" {
 #endif
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_init(JNIEnv *jenv, jclass jcls) {
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_start(JNIEnv *jenv, jclass jcls, jint jarg2, jint jarg3, jint jarg4, jint jarg5, jint jarg6, jint jarg7) {
+  JNIEnv *arg1 = (JNIEnv *) 0 ;
+  jint arg2 ;
+  jint arg3 ;
+  jint arg4 ;
+  jint arg5 ;
+  jint arg6 ;
+  jint arg7 ;
+  
   (void)jenv;
   (void)jcls;
-  init();
+  
+  arg1 = jenv;
+  
+  arg2 = jarg2; 
+  arg3 = jarg3; 
+  arg4 = jarg4; 
+  arg5 = jarg5; 
+  arg6 = jarg6; 
+  arg7 = jarg7; 
+  start(arg1,arg2,arg3,arg4,arg5,arg6,arg7);
 }
 
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_run(JNIEnv *jenv, jclass jcls) {
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_runNearendProcessing(JNIEnv *jenv, jclass jcls) {
   (void)jenv;
   (void)jcls;
-  run();
+  runNearendProcessing();
 }
 
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_close(JNIEnv *jenv, jclass jcls) {
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_stop(JNIEnv *jenv, jclass jcls) {
   (void)jenv;
   (void)jcls;
-  close();
+  stop();
 }
 
 
@@ -275,14 +292,57 @@ SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_pull(JNIEnv *jen
 }
 
 
-SWIGEXPORT jdouble JNICALL Java_opensl_1example_opensl_1exampleJNI_getTimestamp(JNIEnv *jenv, jclass jcls) {
-  jdouble jresult = 0 ;
-  double result;
+SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_estimate_1delay(JNIEnv *jenv, jclass jcls, jint jarg1) {
+  jint jresult = 0 ;
+  int arg1 ;
+  int result;
   
   (void)jenv;
   (void)jcls;
-  result = (double)getTimestamp();
-  jresult = (jdouble)result; 
+  arg1 = (int)jarg1; 
+  result = (int)estimate_delay(arg1);
+  jresult = (jint)result; 
+  return jresult;
+}
+
+
+SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_get_1estimated_1echo_1delay(JNIEnv *jenv, jclass jcls) {
+  jint jresult = 0 ;
+  int result;
+  
+  (void)jenv;
+  (void)jcls;
+  result = (int)get_estimated_echo_delay();
+  jresult = (jint)result; 
+  return jresult;
+}
+
+
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_offline_1process(JNIEnv *jenv, jclass jcls) {
+  (void)jenv;
+  (void)jcls;
+  offline_process();
+}
+
+
+SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_set_1playback_1stream_1type(JNIEnv *jenv, jclass jcls, jint jarg1) {
+  jint arg1 ;
+  
+  (void)jenv;
+  (void)jcls;
+  arg1 = jarg1; 
+  set_playback_stream_type(arg1);
+}
+
+
+SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_get_1playback_1stream_1type(JNIEnv *jenv, jclass jcls) {
+  jint jresult = 0 ;
+  jint result;
+  
+  (void)jenv;
+  (void)jcls;
+  result = get_playback_stream_type();
+  jresult = result; 
   return jresult;
 }
 

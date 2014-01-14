@@ -9,16 +9,16 @@
 package opensl_example;
 
 public class opensl_example {
-  public static void init() {
-    opensl_exampleJNI.init();
+  public static void start(int audio_track_min_buf_size, int audio_record_min_buf_size, int playback_delay_ms, int echo_delay_ms, int _dump_raw, int is_aec_available) {
+    opensl_exampleJNI.start(audio_track_min_buf_size, audio_record_min_buf_size, playback_delay_ms, echo_delay_ms, _dump_raw, is_aec_available);
   }
 
-  public static void run() {
-    opensl_exampleJNI.run();
+  public static void runNearendProcessing() {
+    opensl_exampleJNI.runNearendProcessing();
   }
 
-  public static void close() {
-    opensl_exampleJNI.close();
+  public static void stop() {
+    opensl_exampleJNI.stop();
   }
 
   public static int push(short[] buf) {
@@ -29,8 +29,24 @@ public class opensl_example {
     return opensl_exampleJNI.pull(buf);
   }
 
-  public static double getTimestamp() {
-    return opensl_exampleJNI.getTimestamp();
+  public static int estimate_delay(int use_mem_data) {
+    return opensl_exampleJNI.estimate_delay(use_mem_data);
+  }
+
+  public static int get_estimated_echo_delay() {
+    return opensl_exampleJNI.get_estimated_echo_delay();
+  }
+
+  public static void offline_process() {
+    opensl_exampleJNI.offline_process();
+  }
+
+  public static void set_playback_stream_type(int stream_type) {
+    opensl_exampleJNI.set_playback_stream_type(stream_type);
+  }
+
+  public static int get_playback_stream_type() {
+    return opensl_exampleJNI.get_playback_stream_type();
   }
 
 }
