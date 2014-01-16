@@ -66,14 +66,14 @@ static SLresult openSLCreateEngine(OPENSL_STREAM *p)
 //              SL_ANDROID_STREAM_MEDIA.
 SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType)
 {
-  SLresult result;
+  SLresult result = SL_RESULT_SUCCESS;
   SLuint32 sr = p->sr;
   SLuint32  channels = p->outchannels;
 
   if (0 == pthread_mutex_trylock(&p->playerLock)) {
-    if(channels){
+    SLDataLocator_AndroidSimpleBufferQueue loc_bufq = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
+    if(channels) {
       // configure audio source
-      SLDataLocator_AndroidSimpleBufferQueue loc_bufq = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
 
       switch(sr){
 
@@ -114,17 +114,25 @@ SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType)
           sr = SL_SAMPLINGRATE_192;
           break;
         default:
-          return -1;
+          result = SL_RESULT_INTERNAL_ERROR;
       }
+    } else {
+      result = SL_RESULT_INTERNAL_ERROR;
+    }
 
+    if (result == SL_RESULT_SUCCESS) {
       const SLInterfaceID ids[] = {SL_IID_VOLUME};
       const SLboolean req[] = {SL_BOOLEAN_FALSE};
       result = (*p->engineEngine)->CreateOutputMix(p->engineEngine, &(p->outputMixObject), 1, ids, req);
-      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+    }
+
+    if (result == SL_RESULT_SUCCESS) {
 
       // realize the output mix
       result = (*p->outputMixObject)->Realize(p->outputMixObject, SL_BOOLEAN_FALSE);
+    }
 
+    if (result == SL_RESULT_SUCCESS) {
       int speakers;
       if(channels > 1) 
         speakers = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
@@ -144,8 +152,9 @@ SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType)
       const SLboolean req1[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
       result = (*p->engineEngine)->CreateAudioPlayer(p->engineEngine, &(p->bqPlayerObject), &audioSrc, &audioSnk,
           sizeof(ids1) / sizeof(SLInterfaceID), ids1, req1);
-      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+    }
 
+    if (result == SL_RESULT_SUCCESS) {
       // set stream type
       p->bqPlayerStreamType = streamType;
       SLAndroidConfigurationItf playerConfig;
@@ -160,21 +169,22 @@ SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType)
 
       // realize the player
       result = (*p->bqPlayerObject)->Realize(p->bqPlayerObject, SL_BOOLEAN_FALSE);
-      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
+    }
 
+    if (result == SL_RESULT_SUCCESS) {
       // get the play interface
       result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_PLAY, &(p->bqPlayerPlay));
-      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
+    }
+    if (result == SL_RESULT_SUCCESS) {
       // get the buffer queue interface
       result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_ANDROIDSIMPLEBUFFERQUEUE,
           &(p->bqPlayerBufferQueue));
-      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
+    }
+    if (result == SL_RESULT_SUCCESS) {
       // register callback on the buffer queue
       result = (*p->bqPlayerBufferQueue)->RegisterCallback(p->bqPlayerBufferQueue, bqPlayerCallback, p);
-      if(result != SL_RESULT_SUCCESS) goto end_openaudio;
-
+    }
+    if (result == SL_RESULT_SUCCESS) {
       SLVolumeItf volumeIf;
       result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject, SL_IID_VOLUME, &volumeIf);
       if (result == SL_RESULT_SUCCESS) {
@@ -192,26 +202,28 @@ SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType)
 
       // set the player's state to playing
       result = (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_PLAYING);
+    }
 
+    if (result == SL_RESULT_SUCCESS) {
       if((p->playBuffer = (short *) calloc(p->outBufSamples, sizeof(short))) == NULL) {
-        return -1;
+        result = SL_RESULT_INTERNAL_ERROR;
       }
+    }
 
+    pthread_mutex_unlock(&p->playerLock);
+
+    if (result == SL_RESULT_SUCCESS) {
       (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue, 
           p->playBuffer,p->outBufSamples*sizeof(short));
-
-end_openaudio:
-      return result;
     }
-    pthread_mutex_unlock(&p->playerLock);
   }
-  return SL_RESULT_SUCCESS;
+  return result;
 }
 
 void openSLPlayClose(OPENSL_STREAM *p){
 
   // destroy buffer queue audio player object, and invalidate all associated interfaces
-  if (0 == pthread_mutex_trylock(&p->playerLock)) {
+  if (p && 0 == pthread_mutex_trylock(&p->playerLock)) {
     if (p->bqPlayerObject != NULL && p->bqPlayerPlay != NULL) {
       SLuint32 state = SL_PLAYSTATE_PLAYING;
       (*p->bqPlayerPlay)->SetPlayState(p->bqPlayerPlay, SL_PLAYSTATE_STOPPED);
@@ -619,14 +631,17 @@ int android_AudioIn(OPENSL_STREAM *p,short *buffer,int size){
 void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
   OPENSL_STREAM *p = (OPENSL_STREAM *) context;
-  int count = read_circular_buffer(p->outrb,p->playBuffer,p->outBufSamples);
-  if (count < p->outBufSamples) {
+  if (p && 0 == pthread_mutex_trylock(&p->playerLock)) {
+    int count = read_circular_buffer(p->outrb,p->playBuffer,p->outBufSamples);
+    if (count < p->outBufSamples) {
       memset(p->playBuffer + count * sizeof(short), 0,
-              (p->outBufSamples - count) * sizeof(short));
+          (p->outBufSamples - count) * sizeof(short));
       count = p->outBufSamples;
+    }
+    (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue,
+        p->playBuffer,count*sizeof(short));
+    pthread_mutex_unlock(&p->playerLock);
   }
-  (*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue,
-          p->playBuffer,count*sizeof(short));
 }
 
 // return: 0 or count.

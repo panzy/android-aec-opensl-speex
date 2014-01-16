@@ -64,6 +64,8 @@ typedef struct opensl_stream {
   SLAndroidSimpleBufferQueueItf bqPlayerBufferQueue;
   SLEffectSendItf bqPlayerEffectSend;
   SLint32 bqPlayerStreamType;
+  // 回调函数要读写缓冲区，主线程关闭播放器时要销毁缓冲区，
+  // 这两个动作需要加锁。
   pthread_mutex_t playerLock;
 
   // recorder interfaces
