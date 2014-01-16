@@ -363,21 +363,41 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
     SLAndroidConfigurationItf recorderConfig;   
     result = (*p->recorderObject)->GetInterface(p->recorderObject, SL_IID_ANDROIDCONFIGURATION, &recorderConfig);
     if(result == SL_RESULT_SUCCESS) {
+      // 关于几种 SL_ANDROID_RECORDING_PRESET_*:
+      //
+      // SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION 
+      //
+      //    此配置会启用Android系统内置的回声消除功能（若设备支持的话）。
+      //
+      //    若设备未实现AEC功能，此配置通常比
+      //    VOICE_RECOGNITION 更糟糕， 因为前者的近
+      //    端可能严重失真因而不利于 Speex。
+      //
+      //    当 Android API 说设备实现了 AEC 时，实际上可能没有(fuck)。
+      //
+      // SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION 
+      //
+      //    按照定义，它不会自动做回声消除，而实际上，它录制的近端信号通常比
+      //    GENERIC 录制的要更加失真一些，因为也不利于 Speex 回声消除。
+      //
+      // SL_ANDROID_RECORDING_PRESET_GENERIC
+      //    
+      //    录制的近端信号中的回声最接近远端信号，因而最有利于用 Speex AEC.
+      //
+      // 结论：
+      // 1, 对 Speex AEC 的友好性比较
+      //    VOICE_COMMUNICATION <= VOICE_RECOGNITION <= GENERIC
+      // 2, 如果设备真的内置 AEC，那么它的效果一般远好于我们自己用 Speex AEC。
+      //
       SLint32 streamType = SL_ANDROID_RECORDING_PRESET_GENERIC;
       if(p->os_api_level >= 11 && p->is_aec_available){
         // SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION = 4
-        // 此配置会启用Android系统内置的回声消除功能（若设备支持的话）。
         // 由于我们目前采用的NDK是android-9，头文件中没有这个常量。
-        //
-        // XXX 问题在于，有些设备声称实现了AEC，但实际上没有，这种情况下
-        // SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION 反而比
-        // SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION 更糟糕，因为前者的
-        // 近端可能失真因而不利于 Speex。
         streamType = 4;
         I("config recorder, android-%d, stream type=SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION", p->os_api_level); 
       } else {
-        streamType = SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION;
-        I("config recorder, android-%d, stream type=SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION", p->os_api_level); 
+        streamType = SL_ANDROID_RECORDING_PRESET_GENERIC;
+        I("config recorder, android-%d, stream type=SL_ANDROID_RECORDING_PRESET_GENERIC", p->os_api_level); 
       }
       result = (*recorderConfig)->SetConfiguration(recorderConfig, SL_ANDROID_KEY_RECORDING_PRESET, &streamType, sizeof(SLint32));
       if (result != SL_RESULT_SUCCESS) {
