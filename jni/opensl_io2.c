@@ -572,7 +572,7 @@ OPENSL_STREAM *android_OpenAudioDevice(int sr, int inchannels, int outchannels,
     return NULL;
   } 
 
-  if(openSLPlayOpen(p, SL_ANDROID_STREAM_MEDIA) != SL_RESULT_SUCCESS) {
+  if(openSLPlayOpen(p, SL_ANDROID_STREAM_VOICE) != SL_RESULT_SUCCESS) {
     android_CloseAudioDevice(p);
     return NULL;
   }  

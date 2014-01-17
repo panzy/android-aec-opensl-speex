@@ -220,7 +220,14 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
             if(AcousticEchoCanceler.isAvailable())
                 aec = 1;
         }
+
         opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms, dump_raw, aec);
+
+        // VoIP 模式，走扬声器
+        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        am.setSpeakerphoneOn(true);
+        am.setMode(AudioManager.MODE_IN_COMMUNICATION);
+
         thread.start();
         thread2.start();
         thread3.start();
