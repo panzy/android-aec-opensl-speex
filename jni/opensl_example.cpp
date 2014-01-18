@@ -130,6 +130,7 @@ float curr_ec_ratio = -1;
 int in_buffer_cnt = 0;
 int out_buffer_cnt = 0;
 
+bool has_builtin_aec = false;
 bool dump_raw = false;
 const bool dump_est_raw = true;
 
@@ -278,6 +279,7 @@ void start(JNIEnv *env, jint track_min_buf_size, jint record_min_buf_size,
     jint playback_delay_ms, jint echo_delay_ms, jint _dump_raw,
     jint is_aec_available)
 {
+  has_builtin_aec = is_aec_available;
   dump_raw = _dump_raw;
   playback_delay = playback_delay_ms / FRAME_MS;
   //
@@ -418,11 +420,11 @@ void runNearendProcessing()
     //
     // estimate echo delay
     //
-
     // |render_hist| 和 |capture_hist| 必须按相同的进度 shift。
     //
     // 写满 |EST_BUF_CAPACITY| 就 shift 一次。
-    if (checkspace_circular_buffer(render_hist, 0) >= EST_BUF_CAPACITY
+    if (!has_builtin_aec
+        && checkspace_circular_buffer(render_hist, 0) >= EST_BUF_CAPACITY
         && checkspace_circular_buffer(capture_hist, 0) >= EST_BUF_CAPACITY) {
 
       if (loop_idx > playback_delay
@@ -507,7 +509,7 @@ void runNearendProcessing()
         int ref_samps = read_circular_buffer(echo_buf, refbuf, samps);
 
         short *out = inbuffer; // output(send) frame
-        if (loop_idx < playback_delay + echo_delay || echo_delay <= 0 || ref_samps < samps) {
+        if (has_builtin_aec || loop_idx < playback_delay + echo_delay || echo_delay <= 0 || ref_samps < samps) {
           // output as-is
         } else {
           // do AEC
