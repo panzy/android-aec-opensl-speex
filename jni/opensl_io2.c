@@ -239,26 +239,6 @@ void openSLPlayClose(OPENSL_STREAM *p){
   }
 }
 
-SLint32 openSLPlayQueryStreamType(OPENSL_STREAM *p) {
-#if 1
-  return p->bqPlayerStreamType;
-#else
-  SLAndroidConfigurationItf playerConfig;
-  SLint32 result = (*p->bqPlayerObject)->GetInterface(p->bqPlayerObject,
-      SL_IID_ANDROIDCONFIGURATION, &playerConfig);
-  assert(SL_RESULT_SUCCESS == result);
-  if (SL_RESULT_SUCCESS == result) {
-    SLint32 streamType;
-    SLint32 valueSize = sizeof(SLint32);
-    result = (*playerConfig)->GetConfiguration(playerConfig,
-        SL_ANDROID_KEY_STREAM_TYPE, &valueSize, &streamType);
-    assert(SL_RESULT_SUCCESS == result);
-    return streamType;
-  }
-  return -1;
-#endif
-}
-
 // Open the OpenSL ES device for input
 static SLresult openSLRecOpen(OPENSL_STREAM *p){
 

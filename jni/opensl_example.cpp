@@ -621,19 +621,6 @@ int get_estimated_echo_delay()
   return echo_delay2 >= 0 ? echo_delay2 * FRAME_MS : -1;
 }
 
-jint get_playback_stream_type()
-{
-  return p ? openSLPlayQueryStreamType(p) : -1;
-}
-
-void set_playback_stream_type(jint stream_type)
-{
-  if (p) {
-    openSLPlayClose(p);
-    openSLPlayOpen(p, (SLint32)stream_type);
-  }
-}
-
 void stop()
 {
   on = 0;

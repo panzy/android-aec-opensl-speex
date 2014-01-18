@@ -325,28 +325,6 @@ SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_offline_1process
 }
 
 
-SWIGEXPORT void JNICALL Java_opensl_1example_opensl_1exampleJNI_set_1playback_1stream_1type(JNIEnv *jenv, jclass jcls, jint jarg1) {
-  jint arg1 ;
-  
-  (void)jenv;
-  (void)jcls;
-  arg1 = jarg1; 
-  set_playback_stream_type(arg1);
-}
-
-
-SWIGEXPORT jint JNICALL Java_opensl_1example_opensl_1exampleJNI_get_1playback_1stream_1type(JNIEnv *jenv, jclass jcls) {
-  jint jresult = 0 ;
-  jint result;
-  
-  (void)jenv;
-  (void)jcls;
-  result = get_playback_stream_type();
-  jresult = result; 
-  return jresult;
-}
-
-
 #ifdef __cplusplus
 }
 #endif

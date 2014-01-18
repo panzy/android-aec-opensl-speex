@@ -116,7 +116,6 @@ typedef struct opensl_stream {
   //              SL_ANDROID_STREAM_MEDIA.
   SLresult openSLPlayOpen(OPENSL_STREAM *p, SLint32 streamType);
   void openSLPlayClose(OPENSL_STREAM *p);
-  SLint32 openSLPlayQueryStreamType(OPENSL_STREAM *p);
 
   /* 
   Read a buffer from the OpenSL stream *p, of size samples. Returns the number of samples read.

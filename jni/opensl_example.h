@@ -77,9 +77,3 @@ int get_estimated_echo_delay();
  * near.raw + echo.raw => send.raw
  */
 void offline_process();
-/* 
- * stream_type - 0 android.media.AudioManager.STREAM_VOICE_CALL
- *               3 android.media.AudioManager.STREAM_MUSIC
- */
-void set_playback_stream_type(jint stream_type);
-jint get_playback_stream_type();
