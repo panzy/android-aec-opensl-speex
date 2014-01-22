@@ -353,7 +353,22 @@ static SLresult openSLRecOpen(OPENSL_STREAM *p){
       //    VOICE_RECOGNITION 更糟糕， 因为前者的近
       //    端可能严重失真因而不利于 Speex。
       //
-      //    当 Android API 说设备实现了 AEC 时，实际上可能没有(fuck)。
+      //    为了帮助内置AEC取得最佳效果，对播放也要进行一些设置：
+      //
+      //    1, stream type
+      //
+      //      设置为 AudioManager.STREAM_VOICE_CALL，
+      //
+      //      这个一般是在初始化播放器（不论是 OpenSL audio player，还是 Android
+      //      Framework 中的 MediaPlayer，SoundPool，或 AudioTrack）时设置。
+      //
+      //    2, audio mode 
+      //      
+      //      设置为 AudioManager.MODE_IN_COMMUNICATION。
+      //
+      //      就目前所知，这个只能通过在 Java 代码中调用
+      //      android.media.AudioManager.setMode()
+      //      来设置，OpenSL 中没有等价 API。
       //
       // SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION 
       //
