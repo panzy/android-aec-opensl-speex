@@ -113,12 +113,27 @@ int delay_estimator::estimate(const short *far, int far_size,
     int filter_size, float *cancel_ratio) 
 {
   *cancel_ratio = 1;
-  return estimate_(far, far_size, near, near_size, filter_size,
-      -1, cancel_ratio);
+  while (1) {
+    int result = estimate_(far, far_size, near, near_size, filter_size,
+        -1, cancel_ratio);
+    if (result >= 0)
+      return result;
+
+    // trim and retry
+    const int trim = 20 * FRAME_SAMPS;
+    const int min_size = 10 * FRAME_SAMPS;
+    D("trim %d samples and retry", trim);
+    far += trim;
+    far_size -= trim;
+    near += trim;
+    near_size -= trim;
+    if (near_size < min_size || far_size < min_size)
+      break;
+  }
 }
 
 // @param base |near|相对于第一次调用时的偏移量——这是个递归算法。
-//              第一次调用时，请传递 －1。
+//              第一次调用时，请传递 -1。
 int delay_estimator::estimate_(const short *far, int far_size,
     const short *near, int near_size,
     int filter_size, int base, float *cancel_ratio) 
