@@ -1,6 +1,6 @@
 /*
-opensl_example_interface.i:
-SWIG interface file to opensl_example functions
+cybertech_aec_interface.i:
+SWIG interface file to cybertech_aec functions
 Copyright (c) 2012, Victor Lazzarini
 All rights reserved.
 
@@ -26,9 +26,9 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-%module opensl_example
+%module EchoCanceller
 %{
-#include "opensl_example.h"
+#include "echo_canceller.h"
 %}
 
 // Enable the JNI class to load the required native library.
@@ -36,7 +36,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   static {
     try {
         java.lang.System.loadLibrary("speex");
-        java.lang.System.loadLibrary("opensl_example");
+        java.lang.System.loadLibrary("cybertech_aec");
     } catch (UnsatisfiedLinkError e) {
         java.lang.System.err.println("native code library failed to load.\n" + e);
         java.lang.System.exit(1);
@@ -48,4 +48,4 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     $1 = jenv;
 %}
 
-%include "opensl_example.h"
+%include "echo_canceller.h"

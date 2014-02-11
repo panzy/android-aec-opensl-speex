@@ -12,14 +12,14 @@ include $(PREBUILT_SHARED_LIBRARY)
 
 
 include $(CLEAR_VARS)
-LOCAL_MODULE   := opensl_example
+LOCAL_MODULE   := cybertech_aec
 LOCAL_C_INCLUDES := $(LOCAL_PATH) \
 	$(LOCAL_PATH)/../../speex-1.2rc1/include
 LOCAL_CFLAGS := -O3
 LOCAL_CPPFLAGS :=$(LOCAL_CFLAGS)
 ###
 
-LOCAL_SRC_FILES := opensl_example.cpp  \
+LOCAL_SRC_FILES := echo_canceller.cpp  \
 opensl_io2.c\
 delay_estimator.cpp \
 java_interface_wrap.cpp 

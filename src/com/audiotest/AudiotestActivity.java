@@ -30,29 +30,28 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.audiotest;
 
 import android.annotation.TargetApi;
+import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.content.res.AssetManager;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.audiofx.AcousticEchoCanceler;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Environment;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
-import opensl_example.opensl_example;
-import android.app.Activity;
-import android.os.Bundle;
+import cn.com.cybertech.audio.EchoCanceller;
 
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
-import static android.os.Build.VERSION_CODES.*;
+import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
 
 public class AudiotestActivity extends Activity implements View.OnClickListener {
     private static final String output_dir = Environment.getExternalStorageDirectory()
@@ -121,7 +120,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
         thread = new Thread() {
             public void run() {
                 setPriority(Thread.MAX_PRIORITY);
-                opensl_example.runNearendProcessing();
+                EchoCanceller.runNearendProcessing();
             }
         };
 
@@ -145,7 +144,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
                             // A) 控制真实流逝时间和音频流时间的差距
                             // B) 检测到队列满了，就 sleep
                             if (false) {
-                                if (opensl_example.push(buf) != FRAME_SAMPS)
+                                if (EchoCanceller.push(buf) != FRAME_SAMPS)
                                     Log.d(TAG, "push failed");
 
                                 // 如果写得太快，需要暂停一会，否则会覆盖底层的缓冲区
@@ -154,7 +153,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
                                     sleep(ahead - 200);
                                 }
                             } else {
-                                while (opensl_example.push(buf) != FRAME_SAMPS) {
+                                while (EchoCanceller.push(buf) != FRAME_SAMPS) {
                                     sleep(FRAME_MS / 2);
                                 }
                             }
@@ -196,7 +195,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
                     byte[] bytes = new byte[FRAME_SAMPS * 2];
                     FileOutputStream fos = new FileOutputStream(send_filename);
                     while(thread != null) {
-                        int n = opensl_example.pull(buf);
+                        int n = EchoCanceller.pull(buf);
                         if (n > 0) {
                             ByteBuffer.wrap(bytes)
                                     .order(ByteOrder.LITTLE_ENDIAN)
@@ -221,7 +220,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
                 aec = 1;
         }
 
-        opensl_example.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms, dump_raw, aec);
+        EchoCanceller.start(track_minbufsz, record_minbufsz, playback_delay, echo_delay_ms, dump_raw, aec);
 
         // VoIP 模式，走扬声器
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -236,7 +235,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
     private void play_record_aec_stop() {
         saveDelay();
 
-        opensl_example.stop();
+        EchoCanceller.stop();
         try {
             if (thread2 != null && thread2.isAlive()) {
                 thread2.interrupt();
@@ -256,7 +255,7 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
     }
 
     private void saveDelay() {
-        int echo_delay_ms = opensl_example.get_estimated_echo_delay();
+        int echo_delay_ms = EchoCanceller.get_estimated_echo_delay();
         SharedPreferences.Editor edt = getSharedPreferences("aec", 0).edit();
         edt.putInt("echo_delay_ms", echo_delay_ms);
         edt.commit();
@@ -311,13 +310,13 @@ public class AudiotestActivity extends Activity implements View.OnClickListener 
                 onPlay((Button)(findViewById(R.id.btn_play_send)), send_filename);
                 break;
             case R.id.btn_offline_est:
-                opensl_example.estimate_delay(0);
+                EchoCanceller.estimate_delay(0);
                 saveDelay();
                 break;
             case R.id.btn_offline_aec:
             {
                 long t = System.currentTimeMillis();
-                opensl_example.offline_process();
+                EchoCanceller.offline_process();
                 Log.i(TAG, "offline process, elapse " + (System.currentTimeMillis() - t) + "ms");
             }
                 break;

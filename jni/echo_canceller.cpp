@@ -17,7 +17,7 @@
 #include "speex/speex_echo.h"
 #include "speex/speex_preprocess.h"
 
-#include "opensl_example.h"
+#include "echo_canceller.h"
 #include "common.h"
 #include "delay_estimator.h"
 
